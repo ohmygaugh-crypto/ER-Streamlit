@@ -24,8 +24,7 @@ class Neo4jHandler:
     def execute_read(self, query, parameters=None):
         """Execute a read query with optional parameters."""
         with self.driver.session() as session:
-            result = session.execute_read(lambda tx: tx.run(query, **(parameters or {})))
-            return result
+            return session.execute_read(lambda tx: list(tx.run(query, **(parameters or {}))))
 
     def delete_nodes(self, label=None):
         """
