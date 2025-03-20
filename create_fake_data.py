@@ -6,6 +6,7 @@ import argparse
 import requests
 from dotenv import load_dotenv
 from neo4j_handler import Neo4jHandler
+import numpy as np
 
 # Load environment variables from the .env file.
 load_dotenv()
@@ -19,6 +20,11 @@ if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
 # Configure logging.
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# using numpy, create a random number generator with gaussian distribution with integers between 1 and 20 with a mean of 7 and a standard deviation of 3
+
+def num_identities():   
+    return abs(int(np.random.normal(8, 5)) )
 
 def fetch_random_users(num_profiles):
     """Fetch random user data from the randomuser.me API."""
@@ -34,7 +40,10 @@ def apply_random_typo(text):
         return text
     option = random.choice(["delete", "swap", "insert", "replace"])
     index = random.randint(0, len(text) - 1)
-    if option == "delete":
+    if text.isnumeric():
+        number = random.randint(0, 9)
+        return str(text)[:index] + str(number) + str(text)[index:]
+    elif option == "delete":
         # Remove the character at the chosen index.
         return text[:index] + text[index+1:]
     elif option == "swap":
@@ -62,8 +71,9 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
     handler = Neo4jHandler(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
     
     if delete_all:
-        logger.info("Deleting all nodes and relationships before proceeding.")
         handler.delete_nodes()
+        logger.info("Deleting all nodes and relationships before proceeding.")
+
     
     # Fetch random users from the API.
     users = fetch_random_users(num_profiles)
@@ -78,60 +88,77 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
         # Extract additional properties from the API result.
         email = user.get("email", "")
         phone = user.get("phone", "")
+        phone = "".join(filter(str.isdigit, phone))
         location = user.get("location", {})
+        street_number = location.get("street", {}).get("number", "")
+        street_name = location.get("street", {}).get("name", "")
+        city = location.get("city", "")
+        state = location.get("state", "")
+        country = location.get("country", "")
         postcode = location.get("postcode", "")
+
+        # Combine all parts to create the full address
+        full_address = f"{street_number} {street_name}, {city}, {state}, {country} {postcode}"
         if isinstance(postcode, int):
             postcode = str(postcode)
+
+
+        num_ids = num_identities()
+
+        if num_ids > 4:
+            num_profiles = random.randint(1, 3)
         
-        # Create a Profile node for this person WITHOUT full_name property.
-        profile_id = str(uuid.uuid4())
-        handler.merge_node("Profile", "id", profile_id, {})  # No properties for Profile
-        logger.debug(f"Created Profile node with id {profile_id}")
+        profiles = []
+        for i in range(num_profiles):
+            profile_id = str(uuid.uuid4())
+            handler.merge_node("Profile", "id", profile_id, {})  # No properties for Profile
+            logger.debug(f"Created Profile node with id {profile_id}")
+            profiles.append(profile_id)
+
         
         # Determine a random number (1-10) of Identity nodes for this Profile.
-        num_identities = random.randint(1, 10)
-        for _ in range(num_identities):
+        
+        for i in range(num_ids):
             identity_id = str(uuid.uuid4())
             # Each Identity node always has the full_name.
             identity_props = {"full_name": full_name}
+            profile_id = profiles[i % len(profiles)]
             
             # Prepare available extra properties.
             available_props = {
                 "email_address": email,
                 "zip_code": postcode,
-                "phone_number": phone
+                "phone_number": phone,
+                "full_address": full_address,
             }
             # Randomly choose 2 or 3 properties to include.
-            num_extra_props = random.choice([2, 3])
+            num_extra_props = random.choice([2,3,3,3,4])
             selected_keys = random.sample(list(available_props.keys()), num_extra_props)
             for key in selected_keys:
                 identity_props[key] = available_props[key]
             
             # Apply random typo/variation to a given percentage of identities.
-            if random.random() < (typo_percentage / 100.0):
+            if i > 0 and random.random() < (typo_percentage / 100.0):
                 # Choose one random property (if available) that is a non-empty string.
                 keys = [k for k, v in identity_props.items() if isinstance(v, str) and v]
                 if keys:
                     key_to_modify = random.choice(keys)
                     original_value = identity_props[key_to_modify]
                     identity_props[key_to_modify] = apply_random_typo(original_value)
-                    logger.info(f"Applied typo to property '{key_to_modify}' for Identity {identity_id}")
+                    logger.debug(f"Applied typo to property '{original_value}' to {identity_props[key_to_modify]}")
             
             # Create the Identity node.
             handler.merge_node("Identity", "id", identity_id, identity_props)
             logger.debug(f"Created Identity node with id {identity_id}")
             
-            # Randomly decide whether to attach the Identity to the Profile.
-            if random.random() >= (detached_percentage / 100.0):
-                # Create the CONTAINS_IDENTITY relationship.
-                handler.create_relationship(
-                    source_label="Profile", source_key="id", source_value=profile_id,
-                    target_label="Identity", target_key="id", target_value=identity_id,
-                    relationship_type="CONTAINS_IDENTITY"
-                )
-                logger.debug(f"Attached Identity {identity_id} to Profile {profile_id}")
-            else:
-                logger.info(f"Detached Identity {identity_id} (not attached to Profile {profile_id})")
+
+            # Attach the Identity node to the Profile node.
+            handler.create_relationship(
+                source_label="Profile", source_key="id", source_value=profile_id,
+                target_label="Identity", target_key="id", target_value=identity_id,
+                relationship_type="contains_identity"
+            )
+            logger.debug(f"Attached Identity {identity_id} to Profile {profile_id}")
     
     handler.close()
 
@@ -140,15 +167,15 @@ if __name__ == "__main__":
         description="Load a specified number of Profile nodes (with associated Identity nodes) into Neo4j using randomuser.me API."
     )
     parser.add_argument(
-        "--num_profiles", type=int, default=5,
+        "--num_profiles", type=int, default=100,
         help="Number of Profile nodes (each with 1-10 Identity nodes) to create."
     )
     parser.add_argument(
-        "--typo_percentage", type=float, default=10,
+        "--typo_percentage", type=float, default=20,
         help="Percentage of Identity nodes to apply random typos/variations (default 10%)."
     )
     parser.add_argument(
-        "--detached_percentage", type=float, default=10,
+        "--detached_percentage", type=float, default=5,
         help="Percentage of Identity nodes to leave unattached to the Profile node (default 10%)."
     )
     parser.add_argument(
