@@ -43,6 +43,14 @@ def apply_random_typo(text):
     if text.isnumeric():
         number = random.randint(0, 9)
         return str(text)[:index] + str(number) + str(text)[index:]
+    elif "@" in text:
+        email = text.split("@")
+        if random.random() < 0.5:
+            #change the username
+            return apply_random_typo(email[0]) + "@" + email[1]
+        else:
+        #change the domain
+            return email[0] + "@" + random.choice(["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"])
     elif option == "delete":
         # Remove the character at the chosen index.
         return text[:index] + text[index+1:]
@@ -66,7 +74,7 @@ def apply_random_typo(text):
     else:
         return text
 
-def main(num_profiles, typo_percentage, detached_percentage, delete_all):
+def main(num_profiles, typo_percentage, delete_all):
     # Initialize the Neo4j handler.
     handler = Neo4jHandler(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
     
@@ -83,7 +91,6 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
         name_data = user.get("name", {})
         first_name = name_data.get("first", "Unknown")
         last_name = name_data.get("last", "Unknown")
-        full_name = f"{first_name} {last_name}"
         
         # Extract additional properties from the API result.
         email = user.get("email", "")
@@ -106,7 +113,7 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
         num_ids = num_identities()
 
         if num_ids > 4:
-            num_profiles = random.randint(1, 3)
+            num_profiles = random.choice([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,3,4])
         
         profiles = []
         for i in range(num_profiles):
@@ -121,7 +128,7 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
         for i in range(num_ids):
             identity_id = str(uuid.uuid4())
             # Each Identity node always has the full_name.
-            identity_props = {"full_name": full_name}
+            identity_props = {"first_name": first_name, "last_name": last_name}
             profile_id = profiles[i % len(profiles)]
             
             # Prepare available extra properties.
@@ -148,6 +155,7 @@ def main(num_profiles, typo_percentage, detached_percentage, delete_all):
                     logger.debug(f"Applied typo to property '{original_value}' to {identity_props[key_to_modify]}")
             
             # Create the Identity node.
+            identity_props["full_name"] = identity_props["first_name"] + " " + identity_props["last_name"]
             handler.merge_node("Identity", "id", identity_id, identity_props)
             logger.debug(f"Created Identity node with id {identity_id}")
             
@@ -167,20 +175,16 @@ if __name__ == "__main__":
         description="Load a specified number of Profile nodes (with associated Identity nodes) into Neo4j using randomuser.me API."
     )
     parser.add_argument(
-        "--num_profiles", type=int, default=100,
+        "--num_profiles", type=int, default=500,
         help="Number of Profile nodes (each with 1-10 Identity nodes) to create."
     )
     parser.add_argument(
-        "--typo_percentage", type=float, default=20,
+        "--typo_percentage", type=float, default=10,
         help="Percentage of Identity nodes to apply random typos/variations (default 10%)."
-    )
-    parser.add_argument(
-        "--detached_percentage", type=float, default=5,
-        help="Percentage of Identity nodes to leave unattached to the Profile node (default 10%)."
     )
     parser.add_argument(
         "--delete_all", action="store_true",
         help="Delete all existing nodes and relationships before running."
     )
     args = parser.parse_args()
-    main(args.num_profiles, args.typo_percentage, args.detached_percentage, args.delete_all)
+    main(args.num_profiles, args.typo_percentage, args.delete_all)
