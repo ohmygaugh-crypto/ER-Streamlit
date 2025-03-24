@@ -47,7 +47,7 @@ class User:
         self.nickname = self.set_nickname()
 
         self.birth_year = user_data.get("dob", {}).get("date", "")[:4]
-        self.email_address = self.set_email()
+        self.email_address = self.get_email()
         
         self.phone_number = str("".join(filter(str.isdigit, user_data.get("phone", ""))))
 
@@ -76,13 +76,13 @@ class User:
         else:
             return random.choice([*names])
     
-    def set_email(self):
+    def get_email(self):
         domain = random.choice(["gmail", "yahoo", "hotmail", "outlook"])
-        first = random.choice([self.first_name, self.nickname, self.first_name[:1]])
-        last = random.choice([self.last_name])
-        optional = random.choice(["", self.birth_year,str(random.randint(1, 100))])
+        first = random.choice([self.first_name, self.first_name, self.nickname, self.first_name[:1]])
+        last = random.choice([self.last_name, self.last_name, self.last_name[:1]])
+        optional = random.choice(["", self.birth_year,self.birth_year[:2], str(random.randint(1, 100))])
 
-        return f"{first}.{last}{optional}@{domain}.com"
+        return f"{first}{last}{optional}@{domain}.com"
     
     
     
@@ -94,54 +94,65 @@ class User:
         #get property value
         prop_value = getattr(self, property_name)
 
+        for_logging = f"{self.full_name} {property_name} {prop_value} -->"
+
         # update property
-        
-        setattr(self, property_name, self._apply_random_typo(prop_value))
+        if property_name == "first_name" and random.random() < 0.5:
+            setattr(self, property_name, self.set_nickname())
+        else:
+            setattr(self, property_name, self._apply_random_typo(prop_value))
+
+        logger.debug(f"{for_logging} {getattr(self, property_name)}")
 
     def _apply_random_typo(self, text):
         """Introduce a random typo into the given text."""
         option = random.choice(["delete", "swap", "insert", "replace"])
         index = random.randint(0, len(str(text)) - 1)
 
-        if text.isnumeric():
-            number = random.randint(0, 9)
-            return str(text)[:index] + str(number) + str(text)[index:]
-        elif "@" in text :
-            email = text.split("@")
-            rand = random.random()
-            if rand < 0.3:
-                #change the username
-                return self._apply_random_typo(email[0]) + "@" + email[1]
-            elif rand < 0.6:
-                #change first name to nickname
-                name = email[0].split(".")
+        logger.debug(f"Applying typo: option={option}, text='{text}', index={index}")
 
-                return f"""{self.nickname}.{name[1]}@{email[1]}"""
+        if text.isnumeric():
+            logger.debug("Text is numeric.")
+            if option in ["delete", "replace"]:
+                number = random.randint(0, 9)
+                return str(text)[:index] + str(number) + str(text)[index+1:]
             else:
-            #change the domain
-                return email[0] + "@" + random.choice(["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"])
-        
+                lst = list(text)
+                if index == len(lst) - 1:  # Ensure index is not out of range
+                    index -= 1
+                lst[index], lst[index+1] = lst[index+1], lst[index]
+                return "".join(lst)
+
+        elif "@" in text:
+            logger.debug("Text is an email.")
+            return self.get_email()
+
         elif option == "delete":
-            # Remove the character at the chosen index.
+            logger.debug("Option is delete.")
             return text[:index] + text[index+1:]
+
         elif option == "swap":
+            logger.debug("Option is swap.")
             if len(text) < 2:
                 return text
-            # Swap the character at the chosen index with the next one.
-            if index == len(text) - 1:
+            if index == len(text) - 1:  # Ensure index is not out of range
                 index -= 1
             lst = list(text)
             lst[index], lst[index+1] = lst[index+1], lst[index]
             return "".join(lst)
+
         elif option == "insert":
-            # Insert a random letter at the chosen index.
+            logger.debug("Option is insert.")
             letter = random.choice("abcdefghijklmnopqrstuvwxyz")
             return text[:index] + letter + text[index:]
+
         elif option == "replace":
-            # Replace the character at the chosen index with a random letter.
+            logger.debug("Option is replace.")
             letter = random.choice("abcdefghijklmnopqrstuvwxyz")
             return text[:index] + letter + text[index+1:]
+
         else:
+            logger.debug("No valid option found.")
             return text
 
 def main(num_profiles, typo_percentage, delete_all):
@@ -194,7 +205,7 @@ def main(num_profiles, typo_percentage, delete_all):
             # Prepare available extra properties.
             available_props = ["email_address", "phone_number", "full_address"]
             # Randomly choose 2 or 3 properties to include.
-            num_extra_props = random.choice([2,3,3,3,4])
+            num_extra_props = random.choice([2,2,1,3,3,3])
             selected_keys = random.sample(available_props, num_extra_props)
             for key in selected_keys:
                 properties.append(key)
@@ -202,7 +213,7 @@ def main(num_profiles, typo_percentage, delete_all):
             # Apply random typo/variation to a given percentage of identities.
             if i > 0 and random.random() < (typo_percentage / 100.0):
                 # Choose one random property (if available) that is a non-empty string.
-                user.add_typo(random.choice(selected_keys))
+                user.add_typo(random.choice(properties))
             
             # create a dictionary based on the properties
             identity_props = {key: getattr(user, key) for key in properties}
