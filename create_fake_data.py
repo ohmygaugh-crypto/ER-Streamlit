@@ -192,7 +192,7 @@ def main(num_profiles, typo_percentage, delete_all):
             properties = ["first_name", "last_name"]
             
             # Prepare available extra properties.
-            available_props = ["email_address", "zip_code", "phone_number", "full_address"]
+            available_props = ["email_address", "phone_number", "full_address"]
             # Randomly choose 2 or 3 properties to include.
             num_extra_props = random.choice([2,3,3,3,4])
             selected_keys = random.sample(available_props, num_extra_props)
