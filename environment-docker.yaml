@@ -1,0 +1,22 @@
+name: er_with_splink
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pandas
+  - numpy
+  - scipy
+  - duckdb
+  - requests
+  - python-dotenv
+  - jinja2
+  - altair
+  - igraph
+  - jsonschema
+  - sqlglot
+  - pip:
+      - splink
+      - neo4j
+      - nicknames

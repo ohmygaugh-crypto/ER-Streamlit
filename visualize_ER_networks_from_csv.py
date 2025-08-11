@@ -4,8 +4,16 @@ import pandas as pd
 import numpy as np
 import jellyfish  # For quick string similarity (Levenshtein, Jaro, etc.)
 import io
+import uuid
 
 from st_link_analysis import st_link_analysis, NodeStyle, EdgeStyle
+
+# Try to import networkx, fall back to manual implementation if not available
+try:
+    import networkx as nx
+    HAS_NETWORKX = True
+except ImportError:
+    HAS_NETWORKX = False
 
 # ----------------------
 # CONFIG
@@ -99,6 +107,39 @@ def redline_text(str1, str2):
     # You can adapt to show side-by-side. We'll keep it simple.
     return "".join(out)
 
+def find_connected_components_manual(nodes, edges):
+    """
+    Manual implementation of connected components finding.
+    Fallback when NetworkX is not available.
+    """
+    # Build adjacency list
+    adj_list = {node: set() for node in nodes}
+    for edge in edges:
+        source = edge["data"]["source"]
+        target = edge["data"]["target"]
+        adj_list[source].add(target)
+        adj_list[target].add(source)
+    
+    visited = set()
+    components = []
+    
+    def dfs(node, component):
+        if node in visited:
+            return
+        visited.add(node)
+        component.add(node)
+        for neighbor in adj_list[node]:
+            dfs(neighbor, component)
+    
+    for node in nodes:
+        if node not in visited:
+            component = set()
+            dfs(node, component)
+            if component:  # Only add non-empty components
+                components.append(component)
+    
+    return components
+
 
 # ----------------------
 # LOAD CSV & PROCESS
@@ -147,7 +188,90 @@ if uploaded_file is not None:
         elements = {"nodes": nodes, "edges": edges}
         st.success("Entity Resolution complete! Network graph built.")
 
-        # Optional: Show red-lining for top edges (with slight differences only)
+
+        # ------------
+        # Visualization
+        st.markdown("### Network Graph")
+        node_labels = set(node["data"]["label"] for node in elements["nodes"])
+        rel_labels = set(edge["data"]["label"] for edge in elements["edges"])
+
+        # Basic styling
+        default_colors = ["#2A629A", "#FF7F3E", "#C0C0C0", "#008000", "#800080"]
+        node_styles = []
+        for i, label in enumerate(sorted(node_labels)):
+            color = default_colors[i % len(default_colors)]
+            node_styles.append(NodeStyle(label=label, color=color, caption="name"))
+
+        edge_styles = []
+        for rel in sorted(rel_labels):
+            edge_styles.append(EdgeStyle(rel, caption="similarity", directed=False))
+
+        st_link_analysis(
+            elements,
+            layout="cose",
+            node_styles=node_styles,
+            edge_styles=edge_styles
+        )
+
+        # ------------
+        # Community Detection & CSV Export
+        st.markdown("### Community Detection Results")
+        
+        # Find connected components (communities)
+        if HAS_NETWORKX:
+            # Use NetworkX if available
+            G = nx.Graph()
+            for node in elements["nodes"]:
+                G.add_node(node["data"]["id"])
+            for edge in elements["edges"]:
+                G.add_edge(edge["data"]["source"], edge["data"]["target"])
+            communities = list(nx.connected_components(G))
+        else:
+            # Use manual implementation as fallback
+            st.info("NetworkX not found. Using manual connected components algorithm. Install NetworkX for better performance: `pip install networkx`")
+            node_ids = [node["data"]["id"] for node in elements["nodes"]]
+            communities = find_connected_components_manual(node_ids, elements["edges"])
+        
+        # Create a mapping from node_id to community_id
+        node_to_community = {}
+        community_uuids = {}
+        
+        for i, community in enumerate(communities):
+            community_uuid = str(uuid.uuid4())
+            community_uuids[i] = community_uuid
+            for node_id in community:
+                node_to_community[node_id] = community_uuid
+        
+        # Add community IDs to the original dataframe
+        df_with_communities = df.copy()
+        df_with_communities['community_id'] = [
+            node_to_community.get(str(idx), str(uuid.uuid4())) 
+            for idx in df_with_communities.index
+        ]
+        
+        st.write(f"**Found {len(communities)} communities:**")
+        for i, community in enumerate(communities):
+            st.write(f"- Community {i+1}: {len(community)} records (UUID: {community_uuids[i]})")
+        
+        # Show the results dataframe
+        st.markdown("#### Results with Community IDs")
+        st.dataframe(df_with_communities)
+        
+        # CSV Export option
+        st.markdown("#### Export Results")
+        csv_buffer = io.StringIO()
+        df_with_communities.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+        
+        st.download_button(
+            label="📥 Download Results as CSV",
+            data=csv_data,
+            file_name="entity_resolution_results.csv",
+            mime="text/csv"
+        )
+
+        # ------------
+        # Red-lining (moved to bottom as lower priority)
         if show_redlining and len(edges) > 0:
             st.markdown("### Top Similar Pairs (Red-Lined Differences)")
             
@@ -187,30 +311,35 @@ if uploaded_file is not None:
 
                     st.markdown("---")
 
-
         # ------------
-        # Visualization
-        st.markdown("### Network Graph")
-        node_labels = set(node["data"]["label"] for node in elements["nodes"])
-        rel_labels = set(edge["data"]["label"] for edge in elements["edges"])
-
-        # Basic styling
-        default_colors = ["#2A629A", "#FF7F3E", "#C0C0C0", "#008000", "#800080"]
-        node_styles = []
-        for i, label in enumerate(sorted(node_labels)):
-            color = default_colors[i % len(default_colors)]
-            node_styles.append(NodeStyle(label=label, color=color, caption="name"))
-
-        edge_styles = []
-        for rel in sorted(rel_labels):
-            edge_styles.append(EdgeStyle(rel, caption="similarity", directed=False))
-
-        st_link_analysis(
-            elements,
-            layout="cose",
-            node_styles=node_styles,
-            edge_styles=edge_styles
-        )
+        # Enterprise Scale Note
+        st.markdown("---")
+        st.markdown("### 📈 Enterprise Scale Solutions")
+        
+        if not HAS_NETWORKX:
+            st.warning("""
+            **Missing NetworkX Dependency** 
+            
+            For better performance, install NetworkX:
+            ```bash
+            pip install networkx
+            ```
+            """)
+        
+        st.info("""
+        **Need help with larger scale deployments?** 
+        
+        If you need to persist UUIDs from run to run, handle larger datasets, or require more sophisticated 
+        entity resolution capabilities, you may need an enterprise-scale solution. Consider:
+        
+        - **Database Integration**: Store community IDs in a persistent database
+        - **Incremental Processing**: Handle new data without re-processing everything
+        - **Advanced Blocking**: Use more sophisticated blocking strategies for large datasets
+        - **Distributed Computing**: Scale across multiple machines for very large datasets
+        - **Custom ML Models**: Train domain-specific models for better accuracy
+        
+        Contact your data engineering team for guidance on enterprise implementations.
+        """)
 
 else:
     st.info("Please upload a CSV file in the sidebar to begin.")

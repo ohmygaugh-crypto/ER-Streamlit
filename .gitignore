@@ -400,3 +400,7 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 mock_data.csv
+
+__pycache__
+.venv/
+.specstory/*

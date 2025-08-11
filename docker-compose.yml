@@ -1,0 +1,87 @@
+services:
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: neo4j-splink
+    restart: unless-stopped
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_memory_pagecache_size=512m
+      - NEO4J_dbms_default__database=neo4j
+      - NEO4J_dbms_security_procedures_unrestricted=gds.*,apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=gds.*,apoc.*
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    networks:
+      - splink-network
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  duckdb:
+    image: postgres:14-alpine  # Using PostgreSQL as DuckDB doesn't have official Docker image
+    container_name: duckdb-splink
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=splink
+      - POSTGRES_USER=splink
+      - POSTGRES_PASSWORD=splink_password
+    volumes:
+      - duckdb_data:/var/lib/postgresql/data
+    networks:
+      - splink-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U splink"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  app:
+    build: .
+    container_name: splink-app
+    restart: unless-stopped
+    ports:
+      - "8889:8888"  # Jupyter notebook (changed to avoid conflict)
+      - "8502:8501"  # Streamlit (changed to avoid conflict)
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - DUCKDB_CONNECTION=postgresql://splink:splink_password@duckdb:5432/splink
+    volumes:
+      - .:/app
+      - splink_notebooks:/app/notebooks
+    networks:
+      - splink-network
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      duckdb:
+        condition: service_healthy
+    command: >
+      conda run --no-capture-output -n er_with_splink
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root 
+      --ServerApp.token='' --ServerApp.password='' --ServerApp.allow_remote_access=True
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:
+  duckdb_data:
+  splink_notebooks:
+
+networks:
+  splink-network:
+    driver: bridge
