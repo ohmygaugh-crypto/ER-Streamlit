@@ -1,9 +1,5 @@
-[global]
-# Disable usage stats to prevent analytics errors
-gatherUsageStats = false
-
 [browser]
-# Disable server connection checking to reduce console warnings
+# Disable server connection checking to reduce console warnings  
 gatherUsageStats = false
 
 [server]
