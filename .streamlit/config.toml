@@ -1,0 +1,16 @@
+[global]
+# Disable usage stats to prevent analytics errors
+gatherUsageStats = false
+
+[browser]
+# Disable server connection checking to reduce console warnings
+serverAddress = "localhost"
+gatherUsageStats = false
+
+[server]
+# Reduce browser warnings
+enableCORS = false
+enableXsrfProtection = false
+
+[theme]
+base = "light"

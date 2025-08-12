@@ -23,7 +23,11 @@ DEFAULT_REL_TYPE = "SIMILAR"
 DEFAULT_THRESHOLD = 0.80  # default similarity threshold
 MAX_REDLINE_PREVIEW = 10  # how many top edges to preview with "red-lining"
 
-st.set_page_config(page_title="CSV ER & Network Graph", layout="wide")
+st.set_page_config(
+    page_title="CSV ER & Network Graph", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 st.title("Entity Resolution on CSV (Network Graph)")
 
 # ----------------------
@@ -338,7 +342,7 @@ if uploaded_file is not None:
         - **Distributed Computing**: Scale across multiple machines for very large datasets
         - **Custom ML Models**: Train domain-specific models for better accuracy
         
-        Contact your data engineering team for guidance on enterprise implementations.
+        Contact **Eastridge Analytics** for guidance on enterprise implementations.
         """)
 
 else:

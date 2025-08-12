@@ -21,3 +21,6 @@ dependencies:
   - pip:
       - splink
       - neo4j
+      - streamlit
+      - jellyfish
+      - st-link-analysis
