@@ -2,5 +2,5 @@ streamlit>=1.28.0
 pandas>=1.5.0
 numpy>=1.21.0
 jellyfish>=0.9.0
-st-link-analysis>=1.0.0
+st-link-analysis>=0.4.0
 networkx>=2.8.0
