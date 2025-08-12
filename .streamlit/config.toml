@@ -4,7 +4,6 @@ gatherUsageStats = false
 
 [browser]
 # Disable server connection checking to reduce console warnings
-serverAddress = "localhost"
 gatherUsageStats = false
 
 [server]
