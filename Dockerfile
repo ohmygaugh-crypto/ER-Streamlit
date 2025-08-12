@@ -1,26 +1,28 @@
-# Dockerfile for Splink Entity Resolution Project
-FROM continuumio/miniconda3:latest
+FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Copy environment file first
-COPY environment-docker.yaml .
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create conda environment
-RUN conda env create -f environment-docker.yaml
+# Copy requirements first for better caching
+COPY requirements.txt .
 
-# Make RUN commands use the new environment
-SHELL ["conda", "run", "-n", "er_with_splink", "/bin/bash", "-c"]
-
-# Install additional packages if needed
-RUN pip install jupyterlab streamlit
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Expose ports
-EXPOSE 8888 8501
+# Expose Streamlit port
+EXPOSE 8501
 
-# Activate environment and start bash
-CMD ["conda", "run", "--no-capture-output", "-n", "er_with_splink", "bash"]
+# Health check
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+
+# Run Streamlit app
+ENTRYPOINT ["streamlit", "run", "visualize_ER_networks_from_csv.py", "--server.port=8501", "--server.address=0.0.0.0"]
