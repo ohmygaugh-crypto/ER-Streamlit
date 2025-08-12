@@ -1,64 +1,44 @@
-# ER-with-splink
-Entity Resolution with splink
+---
+title: Entity Resolution Network Analysis
+emoji: 🕸️
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: 1.48.0
+app_file: visualize_ER_networks_from_csv.py
+pinned: false
+license: mit
+---
 
+# Entity Resolution Network Analysis
 
-## Jupyter Notebook Setup in Cursor
+A Streamlit application for entity resolution and network analysis of CSV data using similarity algorithms and interactive graph visualization.
 
-- Create a virtual environment to establish a kernel for the notebook. (helps avoid local dependency conflicts... it's best practice)
-```bash
-  python3 -m venv .venv
-  source .venv/bin/activate      # (or `.venv\Scripts\activate` on Windows)
-  pip install ipykernel notebook
-```
+## Features
 
-- ##### You said:
-  
-  ![Uploaded image](https://files09.oaiusercontent.com/file-MCy6SXVqUKswzM4U5FxSEp?se=2025-06-09T18%3A39%3A28Z&sp=r&sv=2024-08-04&sr=b&rscc=max-age%3D299%2C%20immutable%2C%20private&rscd=attachment%3B%20filename%3D14b34537-e2d3-4910-964b-06555f6122aa.png&sig=aTrCjjO7vWMNKkGd7hnkYyemfiWFQcQmEN93jyq8o/Y%3D)  
-  
-  
+- **CSV Upload & Processing**: Upload CSV files for entity resolution
+- **Similarity Matching**: Configurable similarity thresholds using Jaro-Winkler algorithm
+- **Interactive Network Graphs**: Powered by st-link-analysis and Cytoscape.js
+- **Community Detection**: Automatic clustering of similar entities
+- **Export Results**: Download processed data with community IDs
+- **Red-line Comparison**: Visual diff of similar but not identical records
 
-- **Then** open Cursor’s kernel picker → “Python Environments…” → select `./.venv/bin/python`.
-- Your notebook will now run completely isolated from Global/Conda packages.
-  
-  If you don’t create the venv first, you’ll have to switch kernels mid-notebook and potentially re-install dependencies into whatever interpreter you choose. So: **create your venv → install Jupyter support → pick that in VS Code**.
+## Usage
 
+1. Upload a CSV file using the sidebar
+2. Configure similarity columns and threshold
+3. Click "Run Entity Resolution" to process
+4. Explore the interactive network graph
+5. Download results with community assignments
 
+## Technology Stack
 
-## Initial Environment Setup for splink.ipynb
+- **Streamlit**: Web application framework
+- **NetworkX**: Graph analysis and community detection
+- **st-link-analysis**: Interactive network visualization
+- **Jellyfish**: String similarity algorithms
+- **Pandas/NumPy**: Data processing
 
+## Demo Data
 
-
-see environment.yaml for the complete set of packages to install.
-
-
-```bash
-pip install -r environment.yaml
-```
-
-
-
-
-## Data Generation
-
-Here is the complete set of commands to get your data generation script working. Please run these in your terminal:
-
-
-```bash
-pip install requests
-pip install numpy
-pip install nicknames
-```
-
-After these packages are installed, you can run the data generation script again:
-
-```bash
-python create_fake_data.py --num_profiles 200
-```
-
-
-
-
-This should successfully create the fake data, load it into Neo4j, and resolve the errors you were seeing in your notebook.
-
-![image.png](image.png)
-
+The app includes mock data generation for testing and demonstration purposes.
