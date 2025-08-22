@@ -1,0 +1,85 @@
+Engineering Decision Log - Q4 2024
+Maintained by: Engineering Team
+Last Updated: October 8, 2024
+
+DECISION LOG #ED-2024-015
+Date: September 20, 2024
+Decision: Migrate from JWT to Redis-based session management
+Context: Customer support tickets showing 2-3 second authentication delays affecting enterprise customers (TechCorp, DataFlow Inc, CloudSync)
+Rationale: 
+- Current JWT validation causing performance bottlenecks
+- Redis provides <100ms session lookup times
+- Better horizontal scaling for enterprise customer load
+- Enables real-time features that require persistent connections
+Decision Maker: Mike Rodriguez (Engineering Lead)
+Stakeholders: Sarah Chen (Product), Lisa Thompson (Customer Success)
+Implementation Timeline: October 15 - December 15, 2024
+Dependencies: Infrastructure team Redis cluster setup
+
+DECISION LOG #ED-2024-018
+Date: September 25, 2024
+Decision: Implement circuit breaker pattern for authentication service
+Context: Cascade failures affecting notification service and dashboard loading
+Rationale:
+- Prevents single point of failure in auth service from affecting entire system
+- Improves system resilience during high load periods
+- Supports enterprise SLA requirements (99.9% uptime)
+Decision Maker: Mike Rodriguez (Engineering Lead)
+Impact: Real-time notifications, dashboard performance, API reliability
+Related Tickets: #2024-1015, #2024-1023
+
+DECISION LOG #ED-2024-021
+Date: October 1, 2024
+Decision: Prioritize database query optimization over new feature development
+Context: Analytics dashboard loading times impacting enterprise customer satisfaction
+Rationale:
+- Customer churn risk identified by Customer Success team
+- Performance issues blocking DataFlow Inc go-live (Dec 1 deadline)
+- Query optimization provides immediate relief while auth service redesign in progress
+Resource Allocation: 2 senior developers reassigned from Q1 features
+Timeline: October 1-31, 2024 (parallel to auth service work)
+Success Metrics: Dashboard load time <5 seconds for enterprise datasets
+
+DECISION LOG #ED-2024-024
+Date: October 5, 2024
+Decision: Implement API rate limiting with enterprise customer exemptions
+Context: System performance degradation under enterprise customer load
+Rationale:
+- Protects system stability during peak usage periods
+- Enterprise customers get higher rate limits based on contract tiers
+- Prevents resource starvation affecting other customers
+Technical Approach: Redis-based distributed rate limiting
+Enterprise Limits: TechCorp (500 req/min), DataFlow Inc (1200 req/min), CloudSync (300 req/min)
+Implementation: November 1-15, 2024
+
+DECISION LOG #ED-2024-027
+Date: October 8, 2024
+Decision: Decouple notification service from authentication service
+Context: Real-time notifications failing due to auth service dependencies
+Rationale:
+- Notifications should work independently of auth state changes
+- Reduces system coupling and improves reliability
+- Enables notification features requested by enterprise customers
+Architecture Change: Event-driven notification system with message queues
+Timeline: November 15 - December 31, 2024
+Risk: Requires coordination with ongoing auth service redesign
+
+ARCHITECTURAL DECISIONS SUMMARY:
+1. Move to microservices architecture for better scalability
+2. Implement Redis for session management and caching
+3. Add circuit breaker patterns for fault tolerance
+4. Decouple services to reduce cascade failures
+5. Optimize database queries for enterprise-scale datasets
+
+CUSTOMER-DRIVEN DECISIONS:
+- TechCorp performance requirements driving database optimization
+- DataFlow Inc scalability needs influencing auth service redesign
+- CloudSync notification requirements leading to service decoupling
+- Enterprise SLA commitments shaping reliability patterns
+
+TECHNICAL DEBT PRIORITIES:
+1. Authentication service performance (Critical)
+2. Database query optimization (High)  
+3. Session management scalability (High)
+4. Mobile app memory optimization (Medium)
+5. API documentation updates (Low)

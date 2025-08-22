@@ -1,0 +1,73 @@
+Support Ticket Database Export - Enterprise Customer Issues
+Export Date: October 5, 2024
+Filter: Enterprise Tier Customers, Priority: High/Critical
+
+TICKET #2024-1001
+Customer: TechCorp Solutions
+Date: Sept 10, 2024
+Priority: Critical
+Subject: Dashboard Loading Performance Issues
+Description: Our analytics dashboard is taking 30-45 seconds to load customer data. This is impacting our daily operations and client presentations. The issue started approximately 2 weeks ago and affects all users in our organization.
+Assigned: Lisa Thompson (Customer Success)
+Status: In Progress
+Related Systems: Analytics Dashboard, Database Query Engine
+Customer Tier: Enterprise (500+ users)
+
+TICKET #2024-1015  
+Customer: DataFlow Inc
+Date: Sept 18, 2024
+Priority: High
+Subject: API Timeout Errors During Peak Hours
+Description: We're experiencing frequent API timeout errors between 9 AM - 11 AM EST. Error message: "Authentication service timeout after 30 seconds". This is blocking our automated reporting pipeline.
+Assigned: Mike Rodriguez (Engineering)
+Status: Under Investigation
+Related Systems: Authentication Service, API Gateway
+Customer Tier: Enterprise (1200+ users)
+Go-Live Date: December 1, 2024
+
+TICKET #2024-1023
+Customer: CloudSync Solutions  
+Date: Sept 22, 2024
+Priority: High
+Subject: Real-time Notifications Not Working
+Description: Push notifications stopped working for our team leads. We rely on instant alerts for critical system events. Last working date was approximately Sept 15th.
+Assigned: Sarah Chen (Product)
+Status: Blocked - Waiting for Auth Service Fix
+Related Systems: Notification Service, Authentication Service
+Customer Tier: Enterprise (300+ users)
+
+TICKET #2024-1031
+Customer: TechCorp Solutions
+Date: Sept 28, 2024  
+Priority: High
+Subject: Mobile App Crashes on Large Dataset Views
+Description: Mobile app crashes when viewing analytics reports with >10,000 data points. Desktop version works fine. This is affecting our field sales team who rely on mobile access.
+Assigned: Development Team
+Status: Needs Specification
+Related Systems: Mobile App, Analytics Engine, Database
+Customer Tier: Enterprise (500+ users)
+
+TICKET #2024-1045
+Customer: DataFlow Inc
+Date: Oct 1, 2024
+Priority: Critical
+Subject: Session Timeout Issues Blocking Go-Live
+Description: Users are getting logged out every 5-10 minutes during testing phase. This will block our December go-live if not resolved. We need stable 8-hour sessions for our operational staff.
+Assigned: Mike Rodriguez (Engineering)  
+Status: Urgent - Escalated to Engineering Lead
+Related Systems: Authentication Service, Session Management
+Customer Tier: Enterprise (1200+ users)
+Escalation: VP Engineering notified
+
+COMMON PATTERNS IDENTIFIED:
+- Authentication service issues affecting multiple enterprise customers
+- Performance degradation correlating with increased enterprise user load
+- Real-time features dependent on auth service stability
+- Mobile app performance issues with large datasets
+- Session management problems blocking customer go-lives
+
+CUSTOMER SUCCESS NOTES:
+- TechCorp contract renewal at risk due to performance issues
+- DataFlow Inc go-live delay could trigger SLA penalties
+- CloudSync considering alternative solutions for notifications
+- Overall enterprise customer satisfaction down 12% this quarter
