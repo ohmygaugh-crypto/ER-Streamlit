@@ -1,6 +1,7 @@
 """
 GraphRAG Implementation using Kuzu
 Extracts entities, creates knowledge graph, and performs graph-enhanced retrieval
+Enhanced with ontology discovery capabilities
 """
 import os
 import re
@@ -16,6 +17,12 @@ import tiktoken
 import networkx as nx
 from collections import defaultdict
 import json
+
+# Import ontology discovery
+try:
+    from .ontology_discovery import OntologyDiscovery
+except ImportError:
+    from ontology_discovery import OntologyDiscovery
 
 class GraphRAG:
     def __init__(self, db_path: str = "./graph_db", model_name: str = "all-MiniLM-L6-v2"):
@@ -50,6 +57,12 @@ class GraphRAG:
         
         # Create schema
         self._create_schema()
+        
+        # Initialize ontology discovery
+        self.ontology_discovery = OntologyDiscovery(use_llm=bool(self.llm))
+        
+        # Storage for discovered ontology
+        self.discovered_ontology = None
         
         # Entity resolution mappings
         self.entity_mappings = {}
@@ -256,9 +269,34 @@ class GraphRAG:
         
         return relationships
     
-    def load_documents(self, data_dir: str) -> None:
+    def discover_ontology(self, data_dir: str) -> Dict[str, Any]:
+        """Discover ontology from documents before building knowledge graph"""
+        print("🔍 Discovering ontology from documents...")
+        
+        data_path = Path(data_dir)
+        documents = []
+        filenames = []
+        
+        # Load all documents
+        for file_path in data_path.glob("*.txt"):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                documents.append(content)
+                filenames.append(file_path.name)
+        
+        # Discover ontology
+        self.discovered_ontology = self.ontology_discovery.discover_ontology(documents, filenames)
+        
+        print(f"✅ Ontology discovery complete: {self.discovered_ontology['statistics']}")
+        return self.discovered_ontology
+
+    def load_documents(self, data_dir: str, discover_ontology_first: bool = True) -> None:
         """Load documents and build knowledge graph"""
         print("Loading documents and building knowledge graph...")
+        
+        # Discover ontology first if requested
+        if discover_ontology_first and not self.discovered_ontology:
+            self.discover_ontology(data_dir)
         
         # Clear existing data
         try:
@@ -671,3 +709,44 @@ Provide a comprehensive answer that leverages the interconnected nature of the i
         except Exception as e:
             print(f"Graph visualization error: {e}")
             return {'nodes': [], 'edges': [], 'error': str(e)}
+
+    def get_ontology_data(self) -> Dict[str, Any]:
+        """Get discovered ontology data for visualization"""
+        if not self.discovered_ontology:
+            return {'entities': {}, 'relationships': [], 'statistics': {}}
+        return self.discovered_ontology
+
+    def get_ontology_graph_data(self) -> Dict[str, Any]:
+        """Get ontology data formatted for graph visualization"""
+        if not self.discovered_ontology:
+            return {'nodes': [], 'edges': []}
+        
+        # Convert entities to nodes
+        nodes = []
+        for name, entity in self.discovered_ontology['entities'].items():
+            nodes.append({
+                'id': name,
+                'type': entity['type'],
+                'frequency': entity['frequency'],
+                'confidence': entity['confidence']
+            })
+        
+        # Convert relationships to edges
+        edges = []
+        for rel in self.discovered_ontology['relationships']:
+            edges.append({
+                'source': rel['source'],
+                'target': rel['target'],
+                'relationship': rel['relation_type'],
+                'frequency': rel['frequency'],
+                'confidence': rel['confidence']
+            })
+        
+        return {'nodes': nodes, 'edges': edges}
+
+    def export_ontology(self, filepath: str, format: str = 'json'):
+        """Export discovered ontology"""
+        if self.discovered_ontology:
+            self.ontology_discovery.export_ontology(filepath, format)
+        else:
+            print("No ontology discovered yet. Run discover_ontology() first.")
