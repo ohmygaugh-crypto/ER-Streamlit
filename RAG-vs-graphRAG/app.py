@@ -74,30 +74,38 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 @st.cache_resource
-def initialize_systems():
-    """Initialize both RAG systems"""
-    data_dir = Path(__file__).parent / "data"
-    
-    # Initialize Traditional RAG
+def initialize_empty_systems():
+    """Initialize empty RAG systems without any data"""
+    # Initialize Traditional RAG (empty)
     trad_rag = TraditionalRAG()
-    documents = trad_rag.load_documents(str(data_dir))
-    chunks = trad_rag.chunk_documents(documents)
-    trad_rag.create_embeddings(chunks)
     
-    # Initialize GraphRAG with unique database path
+    # Initialize GraphRAG with session-specific database path
     import time
-    db_path = f"./graph_db_{int(time.time())}"
+    db_path = f"./graph_db_session_{int(time.time())}"
     graph_rag = GraphRAG(db_path=db_path)
-    graph_rag.load_documents(str(data_dir))
     
     return trad_rag, graph_rag
+
+def load_sample_data(trad_rag, graph_rag):
+    """Load and process sample enterprise data"""
+    data_dir = Path(__file__).parent / "data"
+    
+    with st.spinner("🔄 Loading sample enterprise documents..."):
+        # Load into Traditional RAG
+        documents = trad_rag.load_documents(str(data_dir))
+        chunks = trad_rag.chunk_documents(documents)
+        trad_rag.create_embeddings(chunks)
+        
+        # Load into GraphRAG
+        graph_rag.load_documents(str(data_dir))
+        
+    st.success("✅ Sample data loaded successfully!")
+    return True
 
 # Clear cache when developing to ensure latest code is used
 def clear_cache():
     """Clear Streamlit cache to reload updated classes"""
-    if st.button("🔄 Clear Cache & Reload", help="Use this if you updated the code"):
-        st.cache_resource.clear()
-        st.rerun()
+    pass  # Now handled in sidebar
 
 
 
@@ -121,8 +129,78 @@ def main():
     # API Key input
     openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password", 
                                           help="Required for LLM-powered answers")
+    
+    # Initialize session state
+    if 'data_loaded' not in st.session_state:
+        st.session_state.data_loaded = False
+    if 'systems_initialized' not in st.session_state:
+        st.session_state.systems_initialized = False
+    if 'current_api_key' not in st.session_state:
+        st.session_state.current_api_key = None
+    
+    # Check if API key changed - reinitialize systems if needed
+    api_key_changed = st.session_state.current_api_key != openai_api_key
+    
     if openai_api_key:
         os.environ["OPENAI_API_KEY"] = openai_api_key
+    elif "OPENAI_API_KEY" in os.environ:
+        del os.environ["OPENAI_API_KEY"]
+    
+    # Only initialize systems if we have an API key OR user specifically requests it
+    if openai_api_key and (not st.session_state.systems_initialized or api_key_changed):
+        st.sidebar.info("🔄 Initializing systems..." + (" (API key updated)" if api_key_changed else ""))
+        
+        trad_rag, graph_rag = initialize_empty_systems()
+        st.session_state.trad_rag = trad_rag
+        st.session_state.graph_rag = graph_rag
+        st.session_state.systems_initialized = True
+        st.session_state.current_api_key = openai_api_key
+        
+        # Clear data if API key changed to force reload with new key
+        if api_key_changed and st.session_state.data_loaded:
+            st.session_state.data_loaded = False
+            st.sidebar.warning("🔄 API key changed - please reload data")
+            
+    elif st.session_state.systems_initialized:
+        # Use existing systems
+        trad_rag = st.session_state.trad_rag
+        graph_rag = st.session_state.graph_rag
+    else:
+        # No API key and no systems - show placeholder
+        trad_rag = None
+        graph_rag = None
+    
+    st.sidebar.markdown("---")
+    
+    # Data loading controls
+    st.sidebar.markdown("### 📂 Data Loading")
+    
+    # Data loading interface
+    if not openai_api_key:
+        st.sidebar.warning("⚠️ Please enter your OpenAI API key above to initialize the systems")
+        
+    elif not st.session_state.data_loaded:
+        st.sidebar.info("🔄 Systems initialized but no data loaded")
+        
+        # Option 1: Load sample data
+        if st.sidebar.button("📋 Load Sample Enterprise Data", 
+                           help="Load sample documents about engineering decisions, meetings, specs, and support tickets"):
+            if trad_rag and graph_rag and load_sample_data(trad_rag, graph_rag):
+                st.session_state.data_loaded = True
+                st.rerun()
+        
+        # Option 2: Upload custom data (placeholder for future)
+        st.sidebar.markdown("🔮 **Coming Soon**: Upload your own documents")
+        
+    else:
+        st.sidebar.success("✅ Data loaded successfully!")
+        if st.sidebar.button("🗑️ Clear Data & Restart", 
+                            help="Remove all data and start fresh"):
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.cache_resource.clear()
+            st.rerun()
     
     # Demo scenarios
     demo_scenarios = {
@@ -147,19 +225,33 @@ def main():
         st.cache_resource.clear()
         st.rerun()
     
-    # Initialize systems
-    with st.spinner("Initializing RAG systems..."):
-        try:
-            trad_rag, graph_rag = initialize_systems()
-            st.sidebar.success("✅ Systems initialized!")
-            
-            # Check if GraphRAG has ontology methods (for debugging)
-            if not hasattr(graph_rag, 'get_ontology_data'):
-                st.sidebar.warning("⚠️ GraphRAG missing ontology methods. Click 'Clear Cache & Reload' above.")
-            
-        except Exception as e:
-            st.error(f"Error initializing systems: {e}")
-            st.stop()
+    # Only show main content if systems are initialized and data is loaded
+    if not openai_api_key:
+        st.info("🔑 Please enter your OpenAI API key in the sidebar to get started")
+    elif not st.session_state.data_loaded:
+        st.info("👈 Please load data from the sidebar to begin exploring RAG vs GraphRAG comparison")
+        
+        # Show empty state preview
+        st.markdown("## 🎯 What You'll Explore")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            ### 🔍 Traditional RAG
+            - Vector similarity search
+            - Document chunking  
+            - Embedding-based retrieval
+            """)
+        
+        with col2:
+            st.markdown("""
+            ### 🕸️ GraphRAG
+            - Knowledge graph construction
+            - Entity relationship mapping
+            - Graph-enhanced retrieval
+            """)
+        
+        return
     
     # Main content - Core RAG vs GraphRAG Comparison
     if st.button("🚀 Run Comparison", type="primary"):
@@ -247,7 +339,7 @@ def main():
         
         with col2:
             render_graph_rag_visualization(trad_rag, graph_rag, question, trad_result, graph_result)
-        
+    
     # Ontology Discovery Section (Independent Feature)
     st.markdown("---")
     render_ontology_discovery_section(graph_rag)

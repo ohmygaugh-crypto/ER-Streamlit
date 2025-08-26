@@ -13,10 +13,13 @@ from sentence_transformers import SentenceTransformer
 import spacy
 from langchain_openai import ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_experimental.graph_transformers import LLMGraphTransformer
+from langchain_core.documents import Document
 import tiktoken
 import networkx as nx
 from collections import defaultdict
 import json
+import numpy as np
 
 # Import ontology discovery
 try:
@@ -46,8 +49,29 @@ class GraphRAG:
         
         # Initialize LLM
         self.llm = None
-        if os.getenv("OPENAI_API_KEY"):
-            self.llm = ChatOpenAI(temperature=0)
+        self.llm_graph_transformer = None
+        api_key = os.getenv("OPENAI_API_KEY")
+        print(f"🔑 API Key Status: {'✅ Found' if api_key else '❌ Not Found'}")
+        if api_key:
+            print(f"🔑 API Key prefix: {api_key[:10]}...")
+            self.llm = ChatOpenAI(temperature=0, model="gpt-4o")
+            
+            # Initialize LangChain Graph Transformer for enhanced entity extraction
+            self.llm_graph_transformer = LLMGraphTransformer(
+                llm=self.llm,
+                allowed_nodes=["Person", "Company", "System", "Technology", "Issue", "Feature", "Decision"],
+                allowed_relationships=[
+                    ("Person", "WORKS_AT", "Company"),
+                    ("Person", "LEADS", "System"),
+                    ("Company", "USES", "System"),
+                    ("System", "DEPENDS_ON", "Technology"),
+                    ("Issue", "AFFECTS", "Company"),
+                    ("Issue", "BLOCKS", "Feature"),
+                    ("Decision", "ADDRESSES", "Issue"),
+                    ("Person", "MAKES", "Decision")
+                ],
+                node_properties=["priority", "status", "date", "impact"]
+            )
         
         # Initialize text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -87,6 +111,55 @@ class GraphRAG:
         except Exception as e:
             print(f"Schema creation error (may already exist): {e}")
     
+    def extract_entities_with_langchain(self, text: str, filename: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Extract entities and relationships using LangChain LLMGraphTransformer"""
+        if not self.llm_graph_transformer:
+            return self.extract_entities(text, filename), []
+        
+        try:
+            # Convert text to LangChain Document format
+            documents = [Document(page_content=text, metadata={"filename": filename})]
+            
+            # Extract graph structure using LLM
+            graph_documents = self.llm_graph_transformer.convert_to_graph_documents(documents)
+            
+            entities = []
+            relationships = []
+            
+            if graph_documents:
+                graph_doc = graph_documents[0]
+                
+                # Convert nodes to our entity format
+                for node in graph_doc.nodes:
+                    entities.append({
+                        'name': node.id,
+                        'type': node.type,
+                        'properties': node.properties,
+                        'filename': filename,
+                        'context': text[:200] + "..."  # First 200 chars as context
+                    })
+                
+                # Convert relationships to our format
+                for rel in graph_doc.relationships:
+                    relationships.append({
+                        'source': rel.source.id,
+                        'target': rel.target.id,
+                        'relationship_type': rel.type,
+                        'properties': rel.properties,
+                        'confidence': 0.9,  # LangChain extractions are high confidence
+                        'context': f"LLM extracted relationship from {filename}"
+                    })
+            
+            print(f"LangChain extracted {len(entities)} entities and {len(relationships)} relationships from {filename}")
+            return entities, relationships
+            
+        except Exception as e:
+            print(f"LangChain extraction failed for {filename}: {e}")
+            # TEMPORARILY DISABLED: Fallback to original method for debugging
+            # return self.extract_entities(text, filename), []
+            # Instead, return empty to force API key requirement
+            return [], []
+
     def extract_entities(self, text: str, filename: str) -> List[Dict[str, Any]]:
         """Extract entities using spaCy NER and custom patterns"""
         entities = []
@@ -294,9 +367,10 @@ class GraphRAG:
         """Load documents and build knowledge graph"""
         print("Loading documents and building knowledge graph...")
         
-        # Discover ontology first if requested
-        if discover_ontology_first and not self.discovered_ontology:
-            self.discover_ontology(data_dir)
+        # TEMPORARILY DISABLED: Discover ontology first if requested (for debugging)
+        # if discover_ontology_first and not self.discovered_ontology:
+        #     self.discover_ontology(data_dir)
+        print("🔧 Ontology discovery temporarily disabled for API key debugging")
         
         # Clear existing data
         try:
@@ -362,8 +436,15 @@ class GraphRAG:
                     # Relationship might already exist
                     pass
                 
-                # Extract entities from chunk
-                entities = self.extract_entities(chunk, file_path.name)
+                # Extract entities and relationships from chunk using LangChain
+                if self.llm_graph_transformer:
+                    entities, chunk_relationships = self.extract_entities_with_langchain(chunk, file_path.name)
+                    all_relationships.extend(chunk_relationships)
+                else:
+                    # TEMPORARILY DISABLED: spaCy fallback for debugging API key
+                    # entities = self.extract_entities(chunk, file_path.name)
+                    print(f"⚠️  No LLM available - skipping entity extraction for {file_path.name}")
+                    entities = []
                 all_entities.extend(entities)
                 
                 # Store entity mentions
@@ -642,73 +723,126 @@ Provide a comprehensive answer that leverages the interconnected nature of the i
             return {'status': f'Error: {e}'}
     
     def get_graph_visualization_data(self) -> Dict[str, Any]:
-        """Get data for graph visualization"""
+        """Get data for graph visualization including chunks and entities"""
         try:
-            # First try to get entities with relationships
-            result = self.conn.execute(
-                """
-                MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
-                RETURN s.name, s.type, t.name, t.type, r.relationship_type, r.confidence
-                LIMIT 50
-                """
-            )
-            
-            nodes = set()
+            nodes = []
             edges = []
             
-            has_relationships = False
-            while result.has_next():
-                has_relationships = True
-                record = result.get_next()
-                source, source_type, target, target_type, rel_type, confidence = record
-                
-                nodes.add((source, source_type))
-                nodes.add((target, target_type))
-                
-                edges.append({
-                    'source': source,
-                    'target': target,
-                    'relationship': rel_type,
-                    'confidence': confidence
-                })
-            
-            # If no relationships found, get all entities and create basic connections
-            if not has_relationships:
-                entity_result = self.conn.execute(
-                    "MATCH (e:Entity) RETURN e.name, e.type LIMIT 20"
+            # Get all chunks as nodes
+            try:
+                chunk_result = self.conn.execute(
+                    "MATCH (c:Chunk) RETURN c.id, c.content, c.filename LIMIT 30"
                 )
-                
-                entity_list = []
+                while chunk_result.has_next():
+                    record = chunk_result.get_next()
+                    chunk_id, content, filename = record
+                    nodes.append({
+                        'id': chunk_id,
+                        'type': 'CHUNK',
+                        'filename': filename,
+                        'content': content[:100] + "..." if content else ""
+                    })
+            except Exception as e:
+                print(f"Error getting chunks: {e}")
+            
+            # Get all entities as nodes  
+            try:
+                entity_result = self.conn.execute("MATCH (e:Entity) RETURN e.id, e.name, e.type LIMIT 50")
                 while entity_result.has_next():
                     record = entity_result.get_next()
-                    entity_list.append((record[0], record[1]))
-                    nodes.add((record[0], record[1]))
-                
-                # Create basic connections between entities of different types
-                for i, (name1, type1) in enumerate(entity_list):
-                    for name2, type2 in entity_list[i+1:]:
-                        if type1 != type2:  # Only connect different types
-                            edges.append({
-                                'source': name1,
-                                'target': name2,
-                                'relationship': 'MENTIONS',
-                                'confidence': 0.5
-                            })
-                            if len(edges) >= 20:  # Limit edges for visualization
-                                break
-                    if len(edges) >= 20:
-                        break
+                    entity_id, entity_name, entity_type = record
+                    nodes.append({
+                        'id': entity_id,
+                        'type': entity_type,
+                        'name': entity_name
+                    })
+            except Exception as e:
+                print(f"Error getting entities: {e}")
             
-            node_list = [{'id': name, 'type': node_type} for name, node_type in nodes]
+            # Get chunk-entity relationships (MENTIONS)
+            try:
+                mention_result = self.conn.execute(
+                    "MATCH (c:Chunk)-[m:MENTIONS]->(e:Entity) RETURN c.id, e.id, 'MENTIONS' LIMIT 100"
+                )
+                while mention_result.has_next():
+                    record = mention_result.get_next()
+                    chunk_id, entity_id, rel_type = record
+                    edges.append({
+                        'source': chunk_id,
+                        'target': entity_id,
+                        'relationship': rel_type,
+                        'confidence': 0.9
+                    })
+            except Exception as e:
+                print(f"Error getting chunk-entity relationships: {e}")
             
+            # Get entity-entity relationships
+            try:
+                relationship_result = self.conn.execute(
+                    "MATCH (e1:Entity)-[r:RELATES_TO]->(e2:Entity) RETURN e1.id, e2.id, r.relationship_type LIMIT 50"
+                )
+                while relationship_result.has_next():
+                    record = relationship_result.get_next()
+                    source_id, target_id, rel_type = record
+                    edges.append({
+                        'source': source_id,
+                        'target': target_id,
+                        'relationship': rel_type,
+                        'confidence': 0.8
+                    })
+            except Exception as e:
+                print(f"Error getting entity relationships: {e}")
+            
+            print(f"📊 Graph visualization: {len(nodes)} nodes ({sum(1 for n in nodes if n['type'] == 'CHUNK')} chunks, {sum(1 for n in nodes if n['type'] != 'CHUNK')} entities), {len(edges)} edges")
             return {
-                'nodes': node_list,
+                'nodes': nodes,
                 'edges': edges
             }
             
         except Exception as e:
             print(f"Graph visualization error: {e}")
             return {'nodes': [], 'edges': [], 'error': str(e)}
+
+    def get_enhanced_chunk_embeddings(self) -> Dict[str, Any]:
+        """Get chunk embeddings enhanced with entity information for visualization"""
+        try:
+            result = self.conn.execute(
+                """
+                MATCH (c:Chunk)
+                OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+                RETURN c.id, c.content, c.filename, c.chunk_index, collect(e.name) as entities
+                """
+            )
+            
+            enhanced_chunks = []
+            while result.has_next():
+                record = result.get_next()
+                chunk_id, content, filename, chunk_index, entities = record
+                
+                # Create enhanced content with entity information
+                entity_text = " ".join(entities) if entities else ""
+                enhanced_content = f"{content} [ENTITIES: {entity_text}]" if entities else content
+                
+                # Generate enhanced embedding
+                embedding = self.embedding_model.encode([enhanced_content])[0]
+                
+                enhanced_chunks.append({
+                    'chunk_id': chunk_id,
+                    'content': content,
+                    'filename': filename,
+                    'chunk_index': chunk_index,
+                    'entities': entities,
+                    'enhanced_content': enhanced_content,
+                    'embedding': embedding,
+                    'token_count': len(tiktoken.get_encoding("cl100k_base").encode(content))
+                })
+            
+            print(f"🕸️ GraphRAG enhanced embeddings for {len(enhanced_chunks)} chunks (with entity info)")
+            return {'chunks': enhanced_chunks}
+            
+        except Exception as e:
+            print(f"Error getting enhanced embeddings: {e}")
+            return {'chunks': []}
 
     def get_ontology_data(self) -> Dict[str, Any]:
         """Get discovered ontology data for visualization"""

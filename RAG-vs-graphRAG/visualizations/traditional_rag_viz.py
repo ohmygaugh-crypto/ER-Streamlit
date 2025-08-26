@@ -23,6 +23,8 @@ def create_vector_space_visualization(trad_rag, query, retrieved_chunks):
     all_colors = []
     all_sizes = []
     
+    print(f"🔍 Traditional RAG visualization using {len(trad_rag.chunks_metadata)} chunks")
+    
     # Generate embeddings for all chunks
     for i, chunk_meta in enumerate(trad_rag.chunks_metadata):
         embedding = trad_rag.embedding_model.encode([chunk_meta['content']])[0]

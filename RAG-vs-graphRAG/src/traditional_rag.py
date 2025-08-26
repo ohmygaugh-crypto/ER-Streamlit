@@ -38,8 +38,11 @@ class TraditionalRAG:
         
         # Initialize LLM
         self.llm = None
-        if os.getenv("OPENAI_API_KEY"):
-            self.llm = ChatOpenAI(temperature=0)
+        api_key = os.getenv("OPENAI_API_KEY")
+        print(f"🔑 Traditional RAG API Key Status: {'✅ Found' if api_key else '❌ Not Found'}")
+        if api_key:
+            print(f"🔑 Traditional RAG API Key prefix: {api_key[:10]}...")
+            self.llm = ChatOpenAI(temperature=0, model="gpt-4o")
     
     def load_documents(self, data_dir: str) -> List[Dict[str, Any]]:
         """Load all text documents from directory"""
@@ -156,6 +159,7 @@ class TraditionalRAG:
         confidence = 0.5
         
         if self.llm:
+            print("🤖 Traditional RAG using OpenAI API for answer generation")
             try:
                 prompt = f"""Based on the following context, answer the question. If the context doesn't contain enough information, say so clearly.
 
@@ -171,8 +175,11 @@ Answer:"""
                 confidence = 0.8  # Basic confidence score
                 
             except Exception as e:
+                print(f"❌ Traditional RAG API call failed: {e}")
                 answer = f"Error generating answer: {str(e)}"
                 confidence = 0.0
+        else:
+            print("⚠️  Traditional RAG: No API key available, returning fallback message")
         
         return {
             'answer': answer,

@@ -68,7 +68,7 @@ class OntologyDiscovery:
         # Initialize LLM if available and requested
         self.llm = None
         if use_llm and os.getenv("OPENAI_API_KEY"):
-            self.llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo")
+            self.llm = ChatOpenAI(temperature=0, model="gpt-4o")
         
         # Text splitter for processing
         self.text_splitter = RecursiveCharacterTextSplitter(

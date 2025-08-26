@@ -128,3 +128,5 @@ requirements_*.txt
 docker-compose.yml
 Dockerfile
 environment*.yaml
+
+graph_db
