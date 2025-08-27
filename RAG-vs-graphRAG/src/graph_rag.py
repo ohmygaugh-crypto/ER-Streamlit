@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import kuzu
 from sentence_transformers import SentenceTransformer
-import spacy
+
 from langchain_openai import ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_experimental.graph_transformers import LLMGraphTransformer
@@ -41,12 +41,7 @@ class GraphRAG:
         # Initialize models
         self.embedding_model = SentenceTransformer(model_name)
         
-        # Load spacy model for NER
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            print("Please install spacy English model: python -m spacy download en_core_web_sm")
-            self.nlp = None
+
         
         # Initialize LLM
         self.llm = None
@@ -115,7 +110,7 @@ class GraphRAG:
     def extract_entities_with_langchain(self, text: str, filename: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Extract entities and relationships using LangChain LLMGraphTransformer"""
         if not self.llm_graph_transformer:
-            return self.extract_entities(text, filename), []
+            return [], []
         
         try:
             # Convert text to LangChain Document format
@@ -161,83 +156,11 @@ class GraphRAG:
             # Don't fall back - we NEED the LLM results, not spaCy
             return [], []
 
-    def extract_entities(self, text: str, filename: str) -> List[Dict[str, Any]]:
-        """Extract entities using spaCy NER and custom patterns"""
-        entities = []
-        
-        if not self.nlp:
-            return self._extract_entities_fallback(text, filename)
-        
-        doc = self.nlp(text)
-        
-        # Extract named entities
-        for ent in doc.ents:
-            if ent.label_ in ['PERSON', 'ORG', 'PRODUCT', 'EVENT', 'DATE']:
-                entities.append({
-                    'name': ent.text.strip(),
-                    'type': ent.label_,
-                    'context': ent.sent.text if ent.sent else "",
-                    'filename': filename
-                })
-        
-        # Extract custom enterprise entities
-        custom_entities = self._extract_custom_entities(text, filename)
-        entities.extend(custom_entities)
-        
-        return entities
+
     
-    def _extract_entities_fallback(self, text: str, filename: str) -> List[Dict[str, Any]]:
-        """Fallback entity extraction using regex patterns"""
-        entities = []
-        
-        # Customer names (capitalized words ending with Inc, Corp, Solutions, etc.)
-        customer_pattern = r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s+(?:Inc|Corp|Solutions|Systems|Technologies|Ltd|LLC))\b'
-        for match in re.finditer(customer_pattern, text):
-            entities.append({
-                'name': match.group(1),
-                'type': 'CUSTOMER',
-                'context': text[max(0, match.start()-50):match.end()+50],
-                'filename': filename
-            })
-        
-        # Technical systems
-        system_pattern = r'\b([A-Z][a-zA-Z]+\s+(?:Service|System|Database|API|Dashboard|App|Engine))\b'
-        for match in re.finditer(system_pattern, text):
-            entities.append({
-                'name': match.group(1),
-                'type': 'SYSTEM',
-                'context': text[max(0, match.start()-50):match.end()+50],
-                'filename': filename
-            })
-        
-        return entities
+
     
-    def _extract_custom_entities(self, text: str, filename: str) -> List[Dict[str, Any]]:
-        """Extract domain-specific entities"""
-        entities = []
-        
-        # Enhanced patterns for better entity extraction
-        tech_patterns = {
-            'TECHNOLOGY': r'\b(Redis|JWT|API|microservice|database|authentication|session|Docker|Kubernetes|Node\.js|JavaScript|Python|GraphRAG|RAG|LLM|AI)\b',
-            'METRIC': r'\b(\d+(?:\.\d+)?(?:%|ms|seconds?|minutes?|hours?|req/min|users?|MB|GB|KB))\b',
-            'SYSTEM_COMPONENT': r'\b([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)*\s+(?:service|component|module|system|engine|gateway|dashboard|app|application))\b',
-            'CUSTOMER': r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s+(?:Inc|Corp|Solutions|Systems|Technologies|Ltd|LLC))\b',
-            'PERSON': r'\b([A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+)\s+\((?:Product|Engineering|Customer|Data|VP|CEO|CTO)\b',
-            'FEATURE': r'\b(real-time notifications?|analytics dashboard|mobile app|API rate limiting|session management)\b',
-            'ISSUE': r'\b(performance issues?|loading times?|timeout errors?|crashes?|bottlenecks?)\b'
-        }
-        
-        for entity_type, pattern in tech_patterns.items():
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                entity_name = match.group(1) if entity_type != 'PERSON' else match.group(0).split('(')[0].strip()
-                entities.append({
-                    'name': entity_name,
-                    'type': entity_type,
-                    'context': text[max(0, match.start()-50):match.end()+50],
-                    'filename': filename
-                })
-        
-        return entities
+
     
     def resolve_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Resolve entity variations to canonical forms"""
@@ -479,10 +402,7 @@ class GraphRAG:
                         # Relationship might already exist
                         pass
             
-            # Extract relationships from full document
-            doc_entities = self.extract_entities(content, file_path.name)
-            doc_relationships = self.extract_relationships(doc_entities, content)
-            all_relationships.extend(doc_relationships)
+            # LLM already extracted relationships from chunks, no need for document-level extraction
         
         # Resolve entities and create relationships
         resolved_entities = self.resolve_entities(all_entities)
@@ -520,8 +440,8 @@ class GraphRAG:
     
     def graph_enhanced_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Perform graph-enhanced retrieval"""
-        # Extract entities from query
-        query_entities = self.extract_entities(query, "query")
+        # Extract entities from query using LLM
+        query_entities, _ = self.extract_entities_with_langchain(query, "query")
         
         # Find relevant chunks through entity connections
         relevant_chunks = []
