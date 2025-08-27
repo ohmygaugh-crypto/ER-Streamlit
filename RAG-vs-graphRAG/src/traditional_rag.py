@@ -13,10 +13,11 @@ import pickle
 import tiktoken
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI
+# Caching removed - using export/import instead
 import openai
 
 class TraditionalRAG:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", chunk_size: int = 500, chunk_overlap: int = 50, dev_mode: bool = False):
         """Initialize Traditional RAG with embedding model and chunking parameters"""
         self.model_name = model_name
         self.chunk_size = chunk_size

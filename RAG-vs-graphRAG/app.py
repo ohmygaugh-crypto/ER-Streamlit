@@ -7,6 +7,7 @@ import time
 import os
 from pathlib import Path
 import sys
+import glob
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -74,33 +75,151 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 @st.cache_resource
-def initialize_empty_systems():
-    """Initialize empty RAG systems without any data"""
-    # Initialize Traditional RAG (empty)
-    trad_rag = TraditionalRAG()
-    
-    # Initialize GraphRAG with session-specific database path
+def initialize_rag_systems(api_key_hash: str):
+    """Initialize RAG systems with fresh database (cache keyed by API key)"""
     import time
+    
+    print(f"🔧 Initializing fresh RAG systems (API key: {'✅' if api_key_hash != 'none' else '❌'})...")
+    
+    # Always create a new database for clean JSON imports
     db_path = f"./graph_db_session_{int(time.time())}"
-    graph_rag = GraphRAG(db_path=db_path)
+    
+    # Initialize Traditional RAG (empty)
+    trad_rag = TraditionalRAG(dev_mode=False)
+    
+    # Initialize GraphRAG with fresh database
+    graph_rag = GraphRAG(db_path=db_path, dev_mode=False)
     
     return trad_rag, graph_rag
+
+def check_graph_database_content(graph_rag):
+    """Check if the GraphRAG database already contains data"""
+    try:
+        # Try to count existing chunks
+        result = graph_rag.conn.execute("MATCH (c:Chunk) RETURN count(c) as chunk_count")
+        chunk_count = 0
+        if result.has_next():
+            chunk_count = result.get_next()[0]
+        
+        # Try to count existing entities
+        result = graph_rag.conn.execute("MATCH (e:Entity) RETURN count(e) as entity_count")
+        entity_count = 0
+        if result.has_next():
+            entity_count = result.get_next()[0]
+            
+        return chunk_count, entity_count
+    except Exception as e:
+        return 0, 0
 
 def load_sample_data(trad_rag, graph_rag):
     """Load and process sample enterprise data"""
     data_dir = Path(__file__).parent / "data"
     
-    with st.spinner("🔄 Loading sample enterprise documents..."):
-        # Load into Traditional RAG
-        documents = trad_rag.load_documents(str(data_dir))
-        chunks = trad_rag.chunk_documents(documents)
-        trad_rag.create_embeddings(chunks)
+    # Check if GraphRAG database already has data
+    chunk_count, entity_count = check_graph_database_content(graph_rag)
+    
+    if chunk_count > 0 or entity_count > 0:
+        st.info(f"📊 Database already contains data: {chunk_count} chunks, {entity_count} entities")
+        st.success("✅ Using existing processed data!")
         
-        # Load into GraphRAG
-        graph_rag.load_documents(str(data_dir))
+        # Still load Traditional RAG since it's not persistent
+        with st.spinner("🔄 Loading data for Traditional RAG..."):
+            documents = trad_rag.load_documents(str(data_dir))
+            chunks = trad_rag.chunk_documents(documents)
+            trad_rag.create_embeddings(chunks)
         
-    st.success("✅ Sample data loaded successfully!")
-    return True
+        return True
+    else:
+        # Database is empty, need to process data
+        with st.spinner("🔄 Loading sample enterprise documents..."):
+            # Load into Traditional RAG
+            documents = trad_rag.load_documents(str(data_dir))
+            chunks = trad_rag.chunk_documents(documents)
+            trad_rag.create_embeddings(chunks)
+            
+            # Load into GraphRAG
+            graph_rag.load_documents(str(data_dir))
+            
+        st.success("✅ Sample data loaded successfully!")
+        return True
+
+
+def import_graph_data(uploaded_file, trad_rag, graph_rag):
+    """Import previously exported graph data into Kuzu database"""
+    try:
+        # Read the uploaded JSON file
+        import json
+        data = json.load(uploaded_file)
+        
+        # Validate the data structure
+        if not isinstance(data, dict) or 'chunks' not in data:
+            st.error("❌ Invalid file format. Please upload a valid graph export JSON.")
+            return False
+        
+        chunks = data.get('chunks', [])
+        entities = data.get('entities', [])
+        relationships = data.get('relationships', [])
+        
+        with st.spinner(f"🚀 Native Kuzu import: {len(chunks)} chunks, {len(entities)} entities, {len(relationships)} relationships..."):
+            
+            # Use native Kuzu JSON import
+            success = graph_rag.import_from_kuzu_json(data)
+            
+            if not success:
+                st.error("❌ Native Kuzu import failed")
+                return False
+            
+            # Prepare Traditional RAG data from chunks
+            st.info("🔄 Setting up Traditional RAG...")
+            
+            # Group chunks by document and create traditional RAG chunks
+            from collections import defaultdict
+            doc_groups = defaultdict(list)
+            for chunk in chunks:
+                doc_groups[chunk['filename']].append(chunk['content'])
+            
+            # Create documents for Traditional RAG
+            trad_documents = []
+            for filename, chunk_contents in doc_groups.items():
+                full_content = '\n\n'.join(chunk_contents)
+                trad_documents.append({
+                    'filename': filename,
+                    'content': full_content,
+                    'filepath': filename
+                })
+            
+            # Process for Traditional RAG
+            trad_chunks = trad_rag.chunk_documents(trad_documents)
+            trad_rag.create_embeddings(trad_chunks)
+            
+            # Store documents for GraphRAG
+            graph_rag.documents = trad_documents
+            
+            # Rebuild entity mappings from imported data
+            graph_rag.entity_mappings = {}
+            for entity in entities:
+                entity_name = entity['name'].lower().replace(' ', '_')
+                if entity_name not in graph_rag.entity_mappings:
+                    graph_rag.entity_mappings[entity_name] = []
+                
+                # Find chunks related to this entity through relationships (updated for native format)
+                related_chunk_ids = [
+                    rel['to'] for rel in relationships 
+                    if rel['from'] == entity['id']  # Updated for native Kuzu format
+                ]
+                graph_rag.entity_mappings[entity_name].extend(related_chunk_ids)
+            
+            print(f"🔗 Rebuilt entity mappings for {len(graph_rag.entity_mappings)} entities")
+        
+        st.success(f"✅ Native Kuzu import successful: {len(chunks)} chunks, {len(entities)} entities, {len(relationships)} relationships!")
+        return True
+        
+    except json.JSONDecodeError:
+        st.error("❌ Invalid JSON file. Please check the file format.")
+        return False
+    except Exception as e:
+        st.error(f"❌ Import error: {str(e)}")
+        return False
 
 # Clear cache when developing to ensure latest code is used
 def clear_cache():
@@ -146,29 +265,35 @@ def main():
     elif "OPENAI_API_KEY" in os.environ:
         del os.environ["OPENAI_API_KEY"]
     
-    # Only initialize systems if we have an API key OR user specifically requests it
-    if openai_api_key and (not st.session_state.systems_initialized or api_key_changed):
-        st.sidebar.info("🔄 Initializing systems..." + (" (API key updated)" if api_key_changed else ""))
+    # Only initialize systems when explicitly needed (for imports or when user requests)
+    # Don't auto-initialize just because API key is present
+    
+    if not st.session_state.systems_initialized:
+        # Systems not initialized - initialize for imports only (no API calls)
+        st.sidebar.info("🔄 Initializing systems (import-only, no API calls)...")
         
-        trad_rag, graph_rag = initialize_empty_systems()
+        # Create API key hash for cache invalidation
+        import hashlib
+        api_key_hash = hashlib.md5("none".encode()).hexdigest()[:8]  # Always use "none" for import-only mode
+        
+        # Initialize systems with fresh database (cached)
+        trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
         st.session_state.trad_rag = trad_rag
         st.session_state.graph_rag = graph_rag
         st.session_state.systems_initialized = True
-        st.session_state.current_api_key = openai_api_key
+        st.session_state.current_api_key = None  # No API key used yet
         
-        # Clear data if API key changed to force reload with new key
-        if api_key_changed and st.session_state.data_loaded:
-            st.session_state.data_loaded = False
-            st.sidebar.warning("🔄 API key changed - please reload data")
-            
-    elif st.session_state.systems_initialized:
+    else:
         # Use existing systems
         trad_rag = st.session_state.trad_rag
         graph_rag = st.session_state.graph_rag
-    else:
-        # No API key and no systems - show placeholder
-        trad_rag = None
-        graph_rag = None
+        
+        # Check if API key changed and notify user
+        if api_key_changed and openai_api_key:
+            st.sidebar.success("✅ API key detected!")
+            st.sidebar.info("💡 Load sample data to use the API key for processing")
+        elif api_key_changed and not openai_api_key:
+            st.sidebar.info("🔑 API key removed - import-only mode")
     
     st.sidebar.markdown("---")
     
@@ -176,21 +301,45 @@ def main():
     st.sidebar.markdown("### 📂 Data Loading")
     
     # Data loading interface
-    if not openai_api_key:
-        st.sidebar.warning("⚠️ Please enter your OpenAI API key above to initialize the systems")
+    if not st.session_state.data_loaded:
+        # Primary option: API key workflow
+        if openai_api_key:
+            if st.sidebar.button("📋 Load Sample Enterprise Data", 
+                               help="Load sample documents about engineering decisions, meetings, specs, and support tickets"):
+                # Reinitialize systems with API key for processing
+                st.sidebar.info("🔄 Initializing systems with API key for processing...")
+                
+                import hashlib
+                api_key_hash = hashlib.md5(openai_api_key.encode()).hexdigest()[:8]
+                
+                # Get fresh systems with API key
+                trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
+                st.session_state.trad_rag = trad_rag
+                st.session_state.graph_rag = graph_rag
+                st.session_state.current_api_key = openai_api_key
+                
+                if load_sample_data(trad_rag, graph_rag):
+                    st.session_state.data_loaded = True
+                    st.rerun()
+        else:
+            st.sidebar.info("💡 Enter API key above, then click 'Run Comparison' to auto-load sample data")
         
-    elif not st.session_state.data_loaded:
-        st.sidebar.info("🔄 Systems initialized but no data loaded")
+        # Alternative option: Import data
+        st.sidebar.markdown("**OR**")
+        uploaded_file = st.sidebar.file_uploader(
+            "📤 Upload JSON 'Knowledge Graph' Array", 
+            type=['json'],
+            help="Upload a previously exported, or kuzudb compatible, graph database JSON file (no API key needed)"
+        )
         
-        # Option 1: Load sample data
-        if st.sidebar.button("📋 Load Sample Enterprise Data", 
-                           help="Load sample documents about engineering decisions, meetings, specs, and support tickets"):
-            if trad_rag and graph_rag and load_sample_data(trad_rag, graph_rag):
-                st.session_state.data_loaded = True
-                st.rerun()
+        if uploaded_file is not None:
+            if st.sidebar.button("⏏️ Import Uploaded Data"):
+                if trad_rag and graph_rag and import_graph_data(uploaded_file, trad_rag, graph_rag):
+                    st.session_state.data_loaded = True
+                    st.rerun()
+                else:
+                    st.sidebar.error("Failed to import data. Please try again.")
         
-        # Option 2: Upload custom data (placeholder for future)
-        st.sidebar.markdown("🔮 **Coming Soon**: Upload your own documents")
         
     else:
         st.sidebar.success("✅ Data loaded successfully!")
@@ -199,10 +348,162 @@ def main():
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            st.cache_resource.clear()
             st.rerun()
     
-    # Demo scenarios
+
+    
+
+    
+    # Export functionality
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**📤 Export Data**")
+    
+    if 'data_loaded' in st.session_state and st.session_state.data_loaded:
+        trad_rag = st.session_state.trad_rag
+        graph_rag = st.session_state.graph_rag
+        
+        # Export Kuzu Database (main export)
+        if st.sidebar.button("📊 Export Graph Database", help="Download complete graph data as JSON"):
+            with st.spinner("Exporting graph database..."):
+                try:
+                    export_data = graph_rag.export_kuzu_database()
+                    if 'error' not in export_data:
+                        import json
+                        json_data = json.dumps(export_data, indent=2)
+                        
+                        st.sidebar.download_button(
+                            label="⬇️ Download Graph Export",
+                            data=json_data,
+                            file_name=f"graph_export_{Path(graph_rag.db_path).name}.json",
+                            mime="application/json",
+                            help="Complete graph data: chunks, entities, relationships, embeddings"
+                        )
+                        
+                        st.sidebar.success(f"✅ Ready! {len(export_data['chunks'])} chunks, {len(export_data['entities'])} entities")
+                    else:
+                        st.sidebar.error(f"Export failed: {export_data['error']}")
+                except Exception as e:
+                    st.sidebar.error(f"Export error: {str(e)}")
+        
+        # Export for specific databases
+        col1, col2 = st.sidebar.columns(2)
+        
+        with col1:
+            if st.button("🌲 Pinecone", help="Export for Pinecone vector DB"):
+                try:
+                    # Create Pinecone-formatted data from graph export
+                    export_data = graph_rag.export_kuzu_database()
+                    pinecone_data = {
+                        "vectors": [
+                            {
+                                "id": chunk["id"],
+                                "values": chunk["embedding"],
+                                "metadata": {
+                                    "content": chunk["content"][:1000],
+                                    "filename": chunk["filename"],
+                                    "chunk_index": chunk["chunk_index"]
+                                }
+                            }
+                            for chunk in export_data["chunks"]
+                        ],
+                        "metadata": {
+                            "total_vectors": len(export_data["chunks"]),
+                            "embedding_dimension": len(export_data["chunks"][0]["embedding"]) if export_data["chunks"] else 0
+                        }
+                    }
+                    
+                    import json
+                    json_data = json.dumps(pinecone_data, indent=2)
+                    st.sidebar.download_button(
+                        label="⬇️ Pinecone JSON",
+                        data=json_data,
+                        file_name="pinecone_vectors.json",
+                        mime="application/json"
+                    )
+                except Exception as e:
+                    st.sidebar.error(f"Pinecone export error: {str(e)}")
+        
+        with col2:
+            if st.button("🕸️ Neo4j", help="Export for Neo4j graph DB"):
+                try:
+                    export_data = graph_rag.export_kuzu_database()
+                    
+                    # Create Neo4j CSV data
+                    import io
+                    import csv
+                    import zipfile
+                    
+                    # Create in-memory zip file
+                    zip_buffer = io.BytesIO()
+                    
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        # Chunks CSV
+                        chunks_csv = io.StringIO()
+                        chunks_writer = csv.writer(chunks_csv)
+                        chunks_writer.writerow(['chunk_id:ID', 'content', 'filename', 'chunk_index:int', ':LABEL'])
+                        for chunk in export_data['chunks']:
+                            chunks_writer.writerow([
+                                chunk['id'],
+                                chunk['content'].replace('"', '""'),
+                                chunk['filename'],
+                                chunk['chunk_index'],
+                                'Chunk'
+                            ])
+                        zip_file.writestr('chunks.csv', chunks_csv.getvalue())
+                        
+                        # Entities CSV
+                        entities_csv = io.StringIO()
+                        entities_writer = csv.writer(entities_csv)
+                        entities_writer.writerow(['entity_id:ID', 'name', 'type', ':LABEL'])
+                        for entity in export_data['entities']:
+                            entities_writer.writerow([
+                                entity['id'],
+                                entity['name'],
+                                entity['type'],
+                                'Entity'
+                            ])
+                        zip_file.writestr('entities.csv', entities_csv.getvalue())
+                        
+                        # Import script
+                        import_script = f"""// Neo4j Import Script
+LOAD CSV WITH HEADERS FROM 'file:///chunks.csv' AS row
+CREATE (c:Chunk {{
+    id: row.chunk_id,
+    content: row.content,
+    filename: row.filename,
+    chunk_index: toInteger(row.chunk_index)
+}});
+
+LOAD CSV WITH HEADERS FROM 'file:///entities.csv' AS row
+CREATE (e:Entity {{
+    id: row.entity_id,
+    name: row.name,
+    type: row.type
+}});
+
+CREATE INDEX chunk_id_index FOR (c:Chunk) ON (c.id);
+CREATE INDEX entity_id_index FOR (e:Entity) ON (e.id);
+"""
+                        zip_file.writestr('import_script.cypher', import_script)
+                    
+                    zip_buffer.seek(0)
+                    st.sidebar.download_button(
+                        label="⬇️ Neo4j ZIP",
+                        data=zip_buffer.getvalue(),
+                        file_name="neo4j_import.zip",
+                        mime="application/zip"
+                    )
+                except Exception as e:
+                    st.sidebar.error(f"Neo4j export error: {str(e)}")
+    else:
+        st.sidebar.info("📊 Load data first to enable exports")
+    
+    # Always show the main comparison interface
+    st.markdown("## 🎯 RAG vs GraphRAG Comparison")
+    
+    # Demo scenarios and question input (moved from sidebar to main page)
+    st.markdown("### 💭 Ask a Question")
+    
     demo_scenarios = {
         "Cross-system Dependencies": "What technical issues are blocking our enterprise customers and how are they related?",
         "Customer Impact Analysis": "Which customers are affected by authentication service problems and what are the consequences?", 
@@ -211,28 +512,22 @@ def main():
         "Business Risk Assessment": "How do current technical problems impact customer satisfaction and business outcomes?"
     }
     
-    selected_scenario = st.sidebar.selectbox("Demo Scenarios", list(demo_scenarios.keys()))
-    custom_question = st.sidebar.text_area("Or ask your own question:", 
-                                          value=demo_scenarios[selected_scenario])
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        selected_scenario = st.selectbox("🎯 Demo Scenarios", list(demo_scenarios.keys()), key="demo_scenario")
+        custom_question = st.text_area("📝 Your Question:", 
+                                      value=demo_scenarios[selected_scenario],
+                                      height=100,
+                                      key="main_question")
     
-    # System comparison toggle
-    show_graph_viz = st.sidebar.checkbox("Show Knowledge Graph", value=True)
+    with col2:
+        st.markdown("**Options:**")
+        show_graph_viz = st.checkbox("Show Knowledge Graph", value=True)
     
-    # Add cache clear button in sidebar
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Development Tools**")
-    if st.sidebar.button("🔄 Clear Cache & Reload", help="Use this if you updated the code"):
-        st.cache_resource.clear()
-        st.rerun()
+    st.markdown("---")
     
-    # Only show main content if systems are initialized and data is loaded
-    if not openai_api_key:
-        st.info("🔑 Please enter your OpenAI API key in the sidebar to get started")
-    elif not st.session_state.data_loaded:
-        st.info("👈 Please load data from the sidebar to begin exploring RAG vs GraphRAG comparison")
-        
-        # Show empty state preview
-        st.markdown("## 🎯 What You'll Explore")
+    # Show preview of what will be compared
+    if not st.session_state.data_loaded:
         col1, col2 = st.columns(2)
         
         with col1:
@@ -251,7 +546,11 @@ def main():
             - Graph-enhanced retrieval
             """)
         
-        return
+        # Show different messages based on state (moved here to be above Run Comparison button)
+        if openai_api_key:
+            st.info("💡 You can load sample data from the sidebar, or click 'Run Comparison' below to process data automatically")
+        else:
+            st.info("💡 1st Import your own data via sidebar OR enter API key'")
     
     # Main content - Core RAG vs GraphRAG Comparison
     if st.button("🚀 Run Comparison", type="primary"):
@@ -260,7 +559,39 @@ def main():
             st.warning("Please enter a question.")
             return
         
+        # Handle data loading logic when Run Comparison is clicked
+        if not st.session_state.data_loaded:
+            if openai_api_key:
+                # User has API key - load sample data automatically
+                st.info("🔄 Loading sample data with API key...")
+                
+                # Reinitialize systems with API key for processing
+                import hashlib
+                api_key_hash = hashlib.md5(openai_api_key.encode()).hexdigest()[:8]
+                
+                # Get fresh systems with API key
+                trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
+                st.session_state.trad_rag = trad_rag
+                st.session_state.graph_rag = graph_rag
+                st.session_state.current_api_key = openai_api_key
+                
+                # Load sample data
+                if load_sample_data(trad_rag, graph_rag):
+                    st.session_state.data_loaded = True
+                    st.success("✅ Sample data loaded successfully!")
+                else:
+                    st.error("❌ Failed to load sample data")
+                    return
+            else:
+                # No API key and no data - can't run comparison
+                st.error("❌ Please either upload data via sidebar or enter an API key to use sample data")
+            return
+        
         st.markdown(f"**Question:** {question}")
+        
+        # Get current systems
+        trad_rag = st.session_state.trad_rag
+        graph_rag = st.session_state.graph_rag
         
         # Create columns for side-by-side comparison
         col1, col2 = st.columns(2)

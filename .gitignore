@@ -129,4 +129,5 @@ docker-compose.yml
 Dockerfile
 environment*.yaml
 
-graph_db
+graph_db_session_*
+.specstory/*

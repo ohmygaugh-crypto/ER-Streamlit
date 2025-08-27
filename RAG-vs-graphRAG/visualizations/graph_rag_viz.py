@@ -113,8 +113,35 @@ def create_hierarchical_layout(nodes):
     return pos_2d
 
 
+def find_most_relevant_graph_node(graph_rag, query, graph_data):
+    """Find the most relevant graph node for the query entry point"""
+    try:
+        # Extract entities from query
+        query_entities = graph_rag.extract_entities(query, "query") if hasattr(graph_rag, 'extract_entities') else []
+        
+        if not query_entities or not graph_data.get('nodes'):
+            return None
+            
+        # Find matching entities in the graph
+        graph_entity_ids = [node['id'] for node in graph_data['nodes'] if node['type'] != 'CHUNK']
+        
+        for entity in query_entities:
+            entity_id = f"entity_{entity['name'].lower().replace(' ', '_')}"
+            if entity_id in graph_entity_ids:
+                return entity_id
+                
+        # If no direct match, return the first entity node as fallback
+        if graph_entity_ids:
+            return graph_entity_ids[0]
+            
+    except Exception as e:
+        print(f"Error finding relevant graph node: {e}")
+    
+    return None
+
+
 def create_graph_traversal_visualization(trad_rag, graph_rag, query, trad_retrieved_chunks, graph_retrieved_chunks, layout_algo="hierarchical"):
-    """Create 3D visualization showing chunks + 2D graph plane + GraphRAG gap-filling"""
+    """Create 3D visualization showing chunks + 2D graph plane + GraphRAG gap-filling with query positioned at relevant graph node"""
     # Use GraphRAG's enhanced chunk embeddings instead of Traditional RAG's static ones
     enhanced_data = graph_rag.get_enhanced_chunk_embeddings()
     enhanced_chunks = enhanced_data.get('chunks', [])
@@ -179,6 +206,13 @@ def create_graph_traversal_visualization(trad_rag, graph_rag, query, trad_retrie
     
     # 1. Add 2D Knowledge Graph Plane (at z=0) - showing chunks and entities
     graph_data = graph_rag.get_graph_visualization_data()
+    
+    # Find the most relevant graph node for query positioning
+    query_entry_node = find_most_relevant_graph_node(graph_rag, query, graph_data)
+    
+    # Initialize pos_2d as empty dict to avoid UnboundLocalError
+    pos_2d = {}
+    
     if graph_data.get('nodes') and graph_data.get('edges'):
         # Create 2D graph layout
         G = nx.Graph()
@@ -192,18 +226,61 @@ def create_graph_traversal_visualization(trad_rag, graph_rag, query, trad_retrie
         # Choose layout algorithm based on user selection
         pos_2d = get_graph_layout(G, graph_data['nodes'], layout_algo)
         
-        # Add graph edges on the z=0 plane
-        for edge in G.edges():
-            if edge[0] in pos_2d and edge[1] in pos_2d:
-                x0, y0 = pos_2d[edge[0]]
-                x1, y1 = pos_2d[edge[1]]
+        # Add graph edges on the z=0 plane - use original edge data, not NetworkX edges
+        edges_drawn = 0
+        mentions_edges = 0
+        relates_edges = 0
+        missing_source_nodes = []
+        missing_target_nodes = []
+        
+        print(f"🔗 Debug: Total edges in graph_data: {len(graph_data['edges'])}")
+        print(f"🔗 Debug: Total nodes with positions: {len(pos_2d)}")
+        
+        for edge in graph_data['edges']:
+            source_id = edge['source']
+            target_id = edge['target']
+            relationship = edge.get('relationship', 'UNKNOWN')
+            
+            # Debug missing nodes and relationship types
+            if source_id not in pos_2d:
+                missing_source_nodes.append(source_id)
+            if target_id not in pos_2d:
+                missing_target_nodes.append(target_id)
+            
+            # Debug first few relationships
+            if len(missing_source_nodes) + len(missing_target_nodes) < 3:
+                print(f"🔗 Debug edge: {source_id} -[{relationship}]-> {target_id}")
+            
+            if source_id in pos_2d and target_id in pos_2d:
+                x0, y0 = pos_2d[source_id]
+                x1, y1 = pos_2d[target_id]
+                
+                # Different colors for different relationship types
+                edge_color = 'rgba(100,100,100,0.6)'  # Default gray
+                edge_width = 2
+                if relationship == 'MENTIONS':
+                    edge_color = 'rgba(65,105,225,0.8)'  # Blue for chunk-entity
+                    edge_width = 3
+                    mentions_edges += 1
+                elif relationship == 'RELATES_TO':
+                    edge_color = 'rgba(255,140,0,0.7)'  # Orange for entity-entity
+                    edge_width = 2
+                    relates_edges += 1
+                
                 fig.add_trace(go.Scatter3d(
                     x=[x0*3, x1*3], y=[y0*3, y1*3], z=[0, 0],
                     mode='lines',
-                    line=dict(color='rgba(100,100,100,0.6)', width=2),
+                    line=dict(color=edge_color, width=edge_width),
                     hoverinfo='none',
                     showlegend=False
                 ))
+                edges_drawn += 1
+        
+        print(f"🔗 Debug: Edges drawn: {edges_drawn} (MENTIONS: {mentions_edges}, RELATES_TO: {relates_edges})")
+        if missing_source_nodes:
+            print(f"🔗 Debug: Missing source nodes: {missing_source_nodes[:5]}...")
+        if missing_target_nodes:
+            print(f"🔗 Debug: Missing target nodes: {missing_target_nodes[:5]}...")
         
         # Add chunk nodes on the z=0 plane
         chunk_nodes = [n for n in graph_data['nodes'] if n['type'] == 'CHUNK']
@@ -291,22 +368,46 @@ def create_graph_traversal_visualization(trad_rag, graph_rag, query, trad_retrie
             text=[f"{c['filename']}: {c['content']}" for c in graph_only_chunks]
         ))
         
-        # Add connection lines from graph plane to gap-filling chunks
+        # Add connection lines showing query entry → graph traversal → gap-filling chunks
         for chunk in graph_only_chunks:
-            # Find the nearest graph entity (simplified)
-            if graph_data.get('nodes') and pos_2d:
-                nearest_entity = list(pos_2d.keys())[0]  # Simplified - could be more sophisticated
-                if nearest_entity in pos_2d:
-                    graph_x, graph_y = pos_2d[nearest_entity]
-                    fig.add_trace(go.Scatter3d(
-                        x=[graph_x*2, chunk['pos'][0]],
-                        y=[graph_y*2, chunk['pos'][1]], 
-                        z=[0, chunk['pos'][2]],
-                        mode='lines',
-                        line=dict(color='#DC143C', width=4, dash='dash'),
-                        showlegend=False,
-                        hoverinfo='none'
-                    ))
+            if query_entry_node and query_entry_node in pos_2d:
+                # Show path: query entry node → gap-filling chunk
+                entry_x, entry_y = pos_2d[query_entry_node]
+                fig.add_trace(go.Scatter3d(
+                    x=[entry_x*3, chunk['pos'][0]],
+                    y=[entry_y*3, chunk['pos'][1]], 
+                    z=[0, chunk['pos'][2]],
+                    mode='lines',
+                    line=dict(color='#DC143C', width=4, dash='dash'),
+                    showlegend=False,
+                    hoverinfo='none'
+                ))
+                
+                # Add intermediate connection showing graph traversal
+                fig.add_trace(go.Scatter3d(
+                    x=[entry_x*3, entry_x*3, chunk['pos'][0]],
+                    y=[entry_y*3, entry_y*3, chunk['pos'][1]], 
+                    z=[0, 0.3, chunk['pos'][2]],
+                    mode='lines',
+                    line=dict(color='#FFD700', width=2, dash='dot'),  # Gold dotted line
+                    showlegend=False,
+                    hoverinfo='none'
+                ))
+            else:
+                # Fallback: Find the nearest graph entity (simplified)
+                if graph_data.get('nodes') and pos_2d:
+                    nearest_entity = list(pos_2d.keys())[0]  
+                    if nearest_entity in pos_2d:
+                        graph_x, graph_y = pos_2d[nearest_entity]
+                        fig.add_trace(go.Scatter3d(
+                            x=[graph_x*3, chunk['pos'][0]],
+                            y=[graph_y*3, chunk['pos'][1]], 
+                            z=[0, chunk['pos'][2]],
+                            mode='lines',
+                            line=dict(color='#DC143C', width=4, dash='dash'),
+                            showlegend=False,
+                            hoverinfo='none'
+                        ))
     
     # 4. Add ignored chunks (gray)
     ignored_chunks = [c for c in chunk_info if not c['trad_retrieved'] and not c['graph_retrieved']]
@@ -322,20 +423,61 @@ def create_graph_traversal_visualization(trad_rag, graph_rag, query, trad_retrie
             text=[f"{c['filename']}: {c['content']}" for c in ignored_chunks]
         ))
     
-    # 5. Add query position
-    fig.add_trace(go.Scatter3d(
-        x=[query_pos[0]], y=[query_pos[1]], z=[query_pos[2]],
-        mode='markers+text',
-        marker=dict(size=16, color='#2E8B57', symbol='diamond'),
-        text=['QUERY'],
-        name='Query',
-        textposition='top center',
-        hovertemplate=f'Query: {query}<extra></extra>'
-    ))
+    # 5. Add query position - either at relevant graph node or floating if no match
+    if query_entry_node and query_entry_node in pos_2d:
+        # Position query at the relevant graph node
+        graph_x, graph_y = pos_2d[query_entry_node]
+        query_x, query_y, query_z = graph_x * 3, graph_y * 3, 0.5  # Slightly elevated above graph plane
+        
+        # Add query at graph node position
+        fig.add_trace(go.Scatter3d(
+            x=[query_x], y=[query_y], z=[query_z],
+            mode='markers+text',
+            marker=dict(size=18, color='#2E8B57', symbol='diamond', 
+                       line=dict(width=3, color='#FFD700')),  # Gold outline
+            text=['QUERY'],
+            name='Query Entry Point',
+            textposition='top center',
+            hovertemplate=f'Query: {query}<br>Connected to: {query_entry_node}<extra></extra>'
+        ))
+        
+        # Add connection from query to the graph node below
+        fig.add_trace(go.Scatter3d(
+            x=[query_x, graph_x * 3],
+            y=[query_y, graph_y * 3], 
+            z=[query_z, 0],
+            mode='lines',
+            line=dict(color='#2E8B57', width=6, dash='solid'),
+            showlegend=False,
+            hoverinfo='none'
+        ))
+        
+        # Add visual indicator for the connected graph node
+        fig.add_trace(go.Scatter3d(
+            x=[graph_x * 3], y=[graph_y * 3], z=[0],
+            mode='markers',
+            marker=dict(size=15, color='#2E8B57', symbol='circle', 
+                       line=dict(width=3, color='#FFD700')),
+            name='Query Entry Node',
+            showlegend=False,
+            hovertemplate=f'Query Entry: {query_entry_node}<extra></extra>'
+        ))
+        
+    else:
+        # Fallback: position query in 3D space if no relevant graph node found
+        fig.add_trace(go.Scatter3d(
+            x=[query_pos[0]], y=[query_pos[1]], z=[query_pos[2]],
+            mode='markers+text',
+            marker=dict(size=16, color='#2E8B57', symbol='diamond'),
+            text=['QUERY (No Graph Match)'],
+            name='Query',
+            textposition='top center',
+            hovertemplate=f'Query: {query}<extra></extra>'
+        ))
     
     # Update layout
     fig.update_layout(
-        title='GraphRAG Gap-Filling: How Knowledge Graph Finds Missing Chunks',
+        title='GraphRAG Gap-Filling: Query Entry Point → Graph Traversal → Missing Chunks',
         scene=dict(
             xaxis_title='Semantic Space X',
             yaxis_title='Semantic Space Y',
@@ -420,7 +562,7 @@ def render_graph_rag_visualization(trad_rag, graph_rag, question, trad_result, g
                     graph_result.get('retrieved_chunks', []),
                     layout_algo
                 )
-                st.plotly_chart(graph_viz, use_container_width=True)
+                st.plotly_chart(graph_viz, use_container_width=True, key=f"graph_viz_{layout_algo}")
             else:
                 st.warning("No graph data available for visualization")
     
@@ -428,9 +570,12 @@ def render_graph_rag_visualization(trad_rag, graph_rag, question, trad_result, g
     st.markdown("""
     **🕸️ GraphRAG Gap-Filling Magic:**
     - **2D Graph Plane (z=0)**: Entity relationship network as foundation
+    - **💎 Green Query Diamond**: Query positioned at relevant graph entity (not isolated!)
     - **🟢 Green Chunks**: Found by both methods (baseline similarity)
     - **🟠 Orange Chunks**: Traditional RAG only (pure similarity)
     - **💎 Red Diamonds**: GraphRAG gap-filling (relationship bridges!)
-    - **Dashed Lines**: How graph entities connect to outlier chunks
-    - **The Story**: GraphRAG uses relationships to reach relevant chunks that similarity search missed
+    - **Solid Green Line**: Query connection to graph entry point
+    - **Red Dashed Lines**: Direct path from query entry to gap-filling chunks
+    - **Gold Dotted Lines**: Graph traversal paths showing intermediate steps
+    - **The Story**: Query starts from relevant graph node, enabling relationship traversal to find missed chunks
     """)

@@ -20,6 +20,7 @@ import networkx as nx
 from collections import defaultdict
 import json
 import numpy as np
+# Caching removed - using export/import instead
 
 # Import ontology discovery
 try:
@@ -28,7 +29,7 @@ except ImportError:
     from ontology_discovery import OntologyDiscovery
 
 class GraphRAG:
-    def __init__(self, db_path: str = "./graph_db", model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, db_path: str = "./graph_db", model_name: str = "all-MiniLM-L6-v2", dev_mode: bool = False):
         """Initialize GraphRAG with Kuzu database and NLP models"""
         self.db_path = db_path
         self.model_name = model_name
@@ -154,10 +155,10 @@ class GraphRAG:
             return entities, relationships
             
         except Exception as e:
-            print(f"LangChain extraction failed for {filename}: {e}")
-            # TEMPORARILY DISABLED: Fallback to original method for debugging
-            # return self.extract_entities(text, filename), []
-            # Instead, return empty to force API key requirement
+            print(f"❌ LangChain extraction failed for {filename}: {e}")
+            print(f"❌ Error type: {type(e).__name__}")
+            print(f"❌ Full error details: {str(e)}")
+            # Don't fall back - we NEED the LLM results, not spaCy
             return [], []
 
     def extract_entities(self, text: str, filename: str) -> List[Dict[str, Any]]:
@@ -441,9 +442,9 @@ class GraphRAG:
                     entities, chunk_relationships = self.extract_entities_with_langchain(chunk, file_path.name)
                     all_relationships.extend(chunk_relationships)
                 else:
-                    # TEMPORARILY DISABLED: spaCy fallback for debugging API key
-                    # entities = self.extract_entities(chunk, file_path.name)
-                    print(f"⚠️  No LLM available - skipping entity extraction for {file_path.name}")
+                    # Require LLM for proper entity extraction
+                    print(f"❌ No LLM available - cannot extract entities for {file_path.name}")
+                    print(f"❌ Set OPENAI_API_KEY to get proper LLM-generated relationships")
                     entities = []
                 all_entities.extend(entities)
                 
@@ -514,6 +515,8 @@ class GraphRAG:
                     )
             except Exception as e:
                 print(f"Error creating relationship {rel['source']} -> {rel['target']}: {e}")
+        
+        print("✅ Graph data loaded successfully!")
     
     def graph_enhanced_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Perform graph-enhanced retrieval"""
@@ -762,7 +765,7 @@ Provide a comprehensive answer that leverages the interconnected nature of the i
             # Get chunk-entity relationships (MENTIONS)
             try:
                 mention_result = self.conn.execute(
-                    "MATCH (c:Chunk)-[m:MENTIONS]->(e:Entity) RETURN c.id, e.id, 'MENTIONS' LIMIT 100"
+                    "MATCH (c:Chunk)-[m:MENTIONS]->(e:Entity) RETURN c.id, e.id, 'MENTIONS'"
                 )
                 while mention_result.has_next():
                     record = mention_result.get_next()
@@ -779,7 +782,7 @@ Provide a comprehensive answer that leverages the interconnected nature of the i
             # Get entity-entity relationships
             try:
                 relationship_result = self.conn.execute(
-                    "MATCH (e1:Entity)-[r:RELATES_TO]->(e2:Entity) RETURN e1.id, e2.id, r.relationship_type LIMIT 50"
+                    "MATCH (e1:Entity)-[r]->(e2:Entity) WHERE e1.id <> e2.id RETURN e1.id, e2.id, label(r)"
                 )
                 while relationship_result.has_next():
                     record = relationship_result.get_next()
@@ -884,3 +887,348 @@ Provide a comprehensive answer that leverages the interconnected nature of the i
             self.ontology_discovery.export_ontology(filepath, format)
         else:
             print("No ontology discovered yet. Run discover_ontology() first.")
+    
+    def export_kuzu_database(self) -> Dict[str, Any]:
+        """Export all data from Kuzu database for external use"""
+        try:
+            from datetime import datetime
+            
+            export_data = {
+                "chunks": [],
+                "entities": [],
+                "relationships": [],
+                "metadata": {
+                    "export_timestamp": datetime.now().isoformat(),
+                    "database_path": self.db_path
+                }
+            }
+            
+            # Export chunks
+            try:
+                result = self.conn.execute("MATCH (c:Chunk) RETURN c.id, c.content, c.filename, c.chunk_index, c.token_count, c.embedding")
+                while result.has_next():
+                    record = result.get_next()
+                    export_data["chunks"].append({
+                        "id": record[0],
+                        "content": record[1],
+                        "filename": record[2],
+                        "chunk_index": record[3],
+                        "token_count": record[4],
+                        "embedding": record[5]
+                    })
+            except Exception as e:
+                print(f"⚠️ No chunks found in database: {e}")
+            
+            # Export entities
+            try:
+                result = self.conn.execute("MATCH (e:Entity) RETURN e.id, e.name, e.type")
+                while result.has_next():
+                    record = result.get_next()
+                    export_data["entities"].append({
+                        "id": record[0],
+                        "name": record[1],
+                        "type": record[2]
+                    })
+            except Exception as e:
+                print(f"⚠️ No entities found in database: {e}")
+            
+            # Export relationships in Kuzu JSON format (with from/to keys)
+            try:
+                # First check what relationships exist
+                print("🔍 Checking for existing relationships...")
+                
+                # Check MENTIONS relationships
+                mentions_result = self.conn.execute("MATCH (c:Chunk)-[m:MENTIONS]->(e:Entity) RETURN count(m) as mentions_count")
+                if mentions_result.has_next():
+                    mentions_count = mentions_result.get_next()[0]
+                    print(f"   MENTIONS relationships: {mentions_count}")
+                
+                # Check RELATES_TO relationships  
+                relates_result = self.conn.execute("MATCH (e1:Entity)-[r:RELATES_TO]->(e2:Entity) RETURN count(r) as relates_count")
+                if relates_result.has_next():
+                    relates_count = relates_result.get_next()[0]
+                    print(f"   RELATES_TO relationships: {relates_count}")
+                
+                # Check ALL relationship types - using label() instead of type()
+                try:
+                    all_rels_result = self.conn.execute("MATCH ()-[r]->() RETURN label(r) as rel_type, count(r) as count")
+                    print("   All relationship types in database:")
+                    while all_rels_result.has_next():
+                        record = all_rels_result.get_next()
+                        print(f"     {record[0]}: {record[1]}")
+                except:
+                    print("   Could not get relationship type breakdown")
+                
+                # Export all relationships - using label() instead of type()
+                result = self.conn.execute("""
+                    MATCH (source)-[r]->(target)
+                    RETURN source.id as from, target.id as to, label(r) as rel_type
+                """)
+                while result.has_next():
+                    record = result.get_next()
+                    rel_data = {
+                        "from": record[0],
+                        "to": record[1],
+                        "rel_type": record[2]
+                    }
+                    export_data["relationships"].append(rel_data)
+                    
+                print(f"   Total relationships exported: {len(export_data['relationships'])}")
+                    
+            except Exception as e:
+                print(f"⚠️ Error exporting relationships: {e}")
+            
+            print(f"📤 Exported Kuzu database:")
+            print(f"   Chunks: {len(export_data['chunks'])}")
+            print(f"   Entities: {len(export_data['entities'])}")
+            print(f"   Relationships: {len(export_data['relationships'])}")
+            
+            return export_data
+            
+        except Exception as e:
+            print(f"❌ Error exporting Kuzu database: {e}")
+            return {"error": str(e)}
+    
+    def import_from_kuzu_json(self, json_data: Dict[str, Any]) -> bool:
+        """Import data using native Kuzu COPY FROM JSON functionality"""
+        try:
+            import tempfile
+            import json
+            import os
+            
+            print("📥 Starting native Kuzu JSON import...")
+            
+            # Check Kuzu version and environment
+            try:
+                version_result = self.conn.execute("CALL kuzu_version() RETURN version")
+                if version_result.has_next():
+                    version = version_result.get_next()[0]
+                    print(f"🔧 Kuzu Version: {version}")
+            except:
+                print("🔧 Kuzu Version: Unknown")
+            
+            # Install and load JSON extension
+            try:
+                self.conn.execute("INSTALL json")
+                print("✅ Installed JSON extension")
+            except Exception as e:
+                print(f"⚠️ JSON extension install failed: {e}")
+                print(f"⚠️ Error type: {type(e).__name__}")
+            
+            try:
+                self.conn.execute("LOAD EXTENSION json")
+                print("✅ Loaded JSON extension")
+            except Exception as e:
+                print(f"⚠️ JSON extension load: {e}")
+                # If native JSON import fails, fall back to manual import
+                print("📥 Falling back to manual import method...")
+                return self._manual_import_fallback(json_data)
+            
+            # Test if JSON extension is working
+            try:
+                test_result = self.conn.execute("SELECT json_valid('{}') as test")
+                if test_result.has_next():
+                    print("✅ JSON extension is working")
+                else:
+                    print("⚠️ JSON extension test failed, using fallback")
+                    return self._manual_import_fallback(json_data)
+            except Exception as e:
+                print(f"⚠️ JSON extension test failed: {e}, using fallback")
+                return self._manual_import_fallback(json_data)
+            
+            # Clear existing data
+            try:
+                self.conn.execute("MATCH (n) DETACH DELETE n")
+                print("✅ Cleared existing data")
+            except:
+                pass
+            
+            # Recreate schema
+            self._create_schema()
+            print("✅ Recreated schema")
+            
+            # Create temporary JSON files for each table
+            with tempfile.TemporaryDirectory() as temp_dir:
+                
+                # Import chunks using COPY FROM JSON
+                if json_data.get("chunks"):
+                    chunks_file = os.path.join(temp_dir, "chunks.json")
+                    with open(chunks_file, 'w') as f:
+                        json.dump(json_data["chunks"], f)
+                    
+                    try:
+                        self.conn.execute(f"COPY Chunk FROM '{chunks_file}'")
+                        print(f"✅ Imported {len(json_data['chunks'])} chunks")
+                    except Exception as e:
+                        print(f"❌ Error importing chunks: {e}")
+                        return False
+                
+                # Import entities using COPY FROM JSON
+                if json_data.get("entities"):
+                    entities_file = os.path.join(temp_dir, "entities.json")
+                    with open(entities_file, 'w') as f:
+                        json.dump(json_data["entities"], f)
+                    
+                    try:
+                        self.conn.execute(f"COPY Entity FROM '{entities_file}'")
+                        print(f"✅ Imported {len(json_data['entities'])} entities")
+                    except Exception as e:
+                        print(f"❌ Error importing entities: {e}")
+                        return False
+                
+                # Import relationships using COPY FROM JSON
+                if json_data.get("relationships"):
+                    # Group relationships by type
+                    rel_types = {}
+                    for rel in json_data["relationships"]:
+                        rel_type = rel.get("rel_type", "RELATED_TO")
+                        if rel_type not in rel_types:
+                            rel_types[rel_type] = []
+                        rel_types[rel_type].append(rel)
+                    
+                    for rel_type, rels in rel_types.items():
+                        # Check if relationship table exists, create if not
+                        try:
+                            # Try to create relationship table (will fail if exists, which is fine)
+                            self.conn.execute(f"""
+                                CREATE REL TABLE IF NOT EXISTS {rel_type}(
+                                    FROM Entity TO Entity,
+                                    confidence DOUBLE DEFAULT 1.0
+                                )
+                            """)
+                        except:
+                            pass  # Table might already exist
+                        
+                        # Create temporary file for this relationship type
+                        rel_file = os.path.join(temp_dir, f"{rel_type}.json")
+                        with open(rel_file, 'w') as f:
+                            json.dump(rels, f)
+                        
+                        try:
+                            self.conn.execute(f"COPY {rel_type} FROM '{rel_file}'")
+                            print(f"✅ Imported {len(rels)} {rel_type} relationships")
+                        except Exception as e:
+                            print(f"❌ Error importing {rel_type} relationships: {e}")
+            
+            print("📥 Native Kuzu JSON import completed successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error in native Kuzu JSON import: {e}")
+            print("📥 Falling back to manual import method...")
+            return self._manual_import_fallback(json_data)
+    
+    def _manual_import_fallback(self, json_data: Dict[str, Any]) -> bool:
+        """Fallback manual import when native JSON import fails"""
+        try:
+            print("📥 Starting manual import fallback...")
+            
+            chunks = json_data.get("chunks", [])
+            entities = json_data.get("entities", [])
+            relationships = json_data.get("relationships", [])
+            
+            # Import chunks manually
+            for chunk in chunks:
+                try:
+                    self.conn.execute(
+                        "CREATE (:Chunk {id: $chunk_id, content: $content, filename: $filename, chunk_index: $idx, token_count: $tokens, embedding: $embedding})",
+                        parameters={
+                            "chunk_id": chunk['id'],
+                            "content": chunk['content'],
+                            "filename": chunk['filename'],
+                            "idx": chunk['chunk_index'],
+                            "tokens": chunk['token_count'],
+                            "embedding": chunk['embedding']
+                        }
+                    )
+                except Exception as e:
+                    print(f"Error importing chunk {chunk['id']}: {e}")
+            
+            print(f"✅ Manually imported {len(chunks)} chunks")
+            
+            # Import entities manually
+            for entity in entities:
+                try:
+                    self.conn.execute(
+                        "CREATE (:Entity {id: $entity_id, name: $name, type: $type})",
+                        parameters={
+                            "entity_id": entity['id'],
+                            "name": entity['name'],
+                            "type": entity['type']
+                        }
+                    )
+                except Exception as e:
+                    print(f"Error importing entity {entity['id']}: {e}")
+            
+            print(f"✅ Manually imported {len(entities)} entities")
+            
+            # Import relationships manually (handle both old and new formats)
+            relationship_count = 0
+            mentions_count = 0
+            relates_to_count = 0
+            
+            for rel in relationships:
+                try:
+                    # Handle both formats: old (source_id/target_id) and new (from/to)
+                    source_id = rel.get('from', rel.get('source_id'))
+                    target_id = rel.get('to', rel.get('target_id'))
+                    rel_type = rel.get('rel_type', rel.get('relationship_type', 'RELATED_TO'))
+                    confidence = rel.get('confidence', rel.get('properties', {}).get('confidence', 1.0))
+                    
+                    if source_id and target_id:
+                        # Handle different relationship types with proper node type matching
+                        if rel_type == 'MENTIONS':
+                            # MENTIONS: Chunk -> Entity
+                            try:
+                                self.conn.execute(
+                                    f"MATCH (source:Chunk {{id: $source_id}}), (target:Entity {{id: $target_id}}) CREATE (source)-[:MENTIONS {{frequency: 1}}]->(target)",
+                                    parameters={
+                                        "source_id": source_id,
+                                        "target_id": target_id
+                                    }
+                                )
+                                mentions_count += 1
+                            except Exception as e:
+                                print(f"Error importing MENTIONS relationship {source_id}->{target_id}: {e}")
+                        
+                        elif rel_type == 'RELATES_TO':
+                            # RELATES_TO: Entity -> Entity  
+                            try:
+                                self.conn.execute(
+                                    f"MATCH (source:Entity {{id: $source_id}}), (target:Entity {{id: $target_id}}) CREATE (source)-[:RELATES_TO {{relationship_type: 'RELATED_TO', confidence: $conf}}]->(target)",
+                                    parameters={
+                                        "source_id": source_id,
+                                        "target_id": target_id,
+                                        "conf": confidence
+                                    }
+                                )
+                                relates_to_count += 1
+                            except Exception as e:
+                                print(f"Error importing RELATES_TO relationship {source_id}->{target_id}: {e}")
+                        
+                        else:
+                            # Other relationship types: try generic approach
+                            try:
+                                self.conn.execute(
+                                    f"MATCH (source {{id: $source_id}}), (target {{id: $target_id}}) CREATE (source)-[:{rel_type} {{confidence: $conf}}]->(target)",
+                                    parameters={
+                                        "source_id": source_id,
+                                        "target_id": target_id,
+                                        "conf": confidence
+                                    }
+                                )
+                            except Exception as e:
+                                print(f"Error importing {rel_type} relationship {source_id}->{target_id}: {e}")
+                        
+                        relationship_count += 1
+                        
+                except Exception as e:
+                    print(f"Error processing relationship: {e}")
+            
+            print(f"✅ Manually imported {relationship_count} relationships ({mentions_count} MENTIONS, {relates_to_count} RELATES_TO)")
+            print("📥 Manual import fallback completed successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error in manual import fallback: {e}")
+            return False

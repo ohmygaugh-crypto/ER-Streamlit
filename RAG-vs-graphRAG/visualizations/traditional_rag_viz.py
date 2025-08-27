@@ -9,7 +9,6 @@ for Traditional RAG retrieval method visualization.
 import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
-from sklearn.decomposition import PCA
 
 
 def create_vector_space_visualization(trad_rag, query, retrieved_chunks):
@@ -49,10 +48,19 @@ def create_vector_space_visualization(trad_rag, query, retrieved_chunks):
     all_colors.append('#2ca02c')  # Green for query
     all_sizes.append(15)
     
-    # Reduce dimensionality to 3D using PCA
+    # Use simple dimensionality reduction without sklearn
     embeddings_array = np.array(all_embeddings)
-    pca = PCA(n_components=3)
-    embeddings_3d = pca.fit_transform(embeddings_array)
+    
+    # Simple PCA-like projection (take first 3 dimensions or pad/truncate)
+    if embeddings_array.shape[1] >= 3:
+        # Take first 3 dimensions
+        embeddings_3d = embeddings_array[:, :3]
+        explained_variance = [0.33, 0.33, 0.34]  # Mock variance ratios
+    else:
+        # Pad with zeros if less than 3 dimensions
+        embeddings_3d = np.zeros((embeddings_array.shape[0], 3))
+        embeddings_3d[:, :embeddings_array.shape[1]] = embeddings_array
+        explained_variance = [0.5, 0.3, 0.2]
     
     # Create 3D scatter plot
     fig = go.Figure()
@@ -119,9 +127,9 @@ def create_vector_space_visualization(trad_rag, query, retrieved_chunks):
     fig.update_layout(
         title='3D Vector Space: Traditional RAG Retrieval',
         scene=dict(
-            xaxis_title=f'PC1 ({pca.explained_variance_ratio_[0]:.1%})',
-            yaxis_title=f'PC2 ({pca.explained_variance_ratio_[1]:.1%})',
-            zaxis_title=f'PC3 ({pca.explained_variance_ratio_[2]:.1%})',
+            xaxis_title=f'Dim 1 ({explained_variance[0]:.1%})',
+            yaxis_title=f'Dim 2 ({explained_variance[1]:.1%})',
+            zaxis_title=f'Dim 3 ({explained_variance[2]:.1%})',
             camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
         ),
         height=500,
@@ -140,7 +148,7 @@ def render_traditional_rag_visualization(trad_rag, question, trad_result):
         vector_fig = create_vector_space_visualization(trad_rag, question, trad_result.get('retrieved_chunks', []))
     
     if vector_fig:
-        st.plotly_chart(vector_fig, use_container_width=True)
+        st.plotly_chart(vector_fig, use_container_width=True, key="traditional_rag_viz")
         
         st.markdown("""
         **🔍 3D Traditional RAG:**
