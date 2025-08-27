@@ -13,11 +13,11 @@ from ..core.graph_rag import GraphRAG
 
 
 @st.cache_resource
-def initialize_rag_systems(api_key_hash: str):
-    """Initialize RAG systems with fresh database (cache keyed by API key)"""
+def initialize_rag_systems(api_key_hash: str, domain_hint: str = None):
+    """Initialize RAG systems with fresh database (cache keyed by API key and domain)"""
     import time
     
-    print(f"🔧 Initializing fresh RAG systems (API key: {'✅' if api_key_hash != 'none' else '❌'})...")
+    print(f"🔧 Initializing fresh RAG systems (API key: {'✅' if api_key_hash != 'none' else '❌'}, domain: {domain_hint or 'auto-detect'})...")
     
     # Always create a new database for clean JSON imports
     db_path = f"./graph_db_session_{int(time.time())}"
@@ -25,8 +25,8 @@ def initialize_rag_systems(api_key_hash: str):
     # Initialize Traditional RAG (empty)
     trad_rag = TraditionalRAG(dev_mode=False)
     
-    # Initialize GraphRAG with fresh database
-    graph_rag = GraphRAG(db_path=db_path, dev_mode=False)
+    # Initialize GraphRAG with fresh database and domain hint
+    graph_rag = GraphRAG(db_path=db_path, dev_mode=False, domain_hint=domain_hint)
     
     return trad_rag, graph_rag
 

@@ -29,10 +29,11 @@ except ImportError:
     from ontology_discovery import OntologyDiscovery
 
 class GraphRAG:
-    def __init__(self, db_path: str = "./graph_db", model_name: str = "all-MiniLM-L6-v2", dev_mode: bool = False):
+    def __init__(self, db_path: str = "./graph_db", model_name: str = "all-MiniLM-L6-v2", dev_mode: bool = False, domain_hint: str = None):
         """Initialize GraphRAG with Kuzu database and NLP models"""
         self.db_path = db_path
         self.model_name = model_name
+        self.domain_hint = self._sanitize_domain_hint(domain_hint)
         
         # Initialize database
         self.db = kuzu.Database(db_path)
@@ -52,22 +53,8 @@ class GraphRAG:
             print(f"🔑 API Key prefix: {api_key[:10]}...")
             self.llm = ChatOpenAI(temperature=0, model="gpt-4o")
             
-            # Initialize LangChain Graph Transformer for enhanced entity extraction
-            self.llm_graph_transformer = LLMGraphTransformer(
-                llm=self.llm,
-                allowed_nodes=["Person", "Company", "System", "Technology", "Issue", "Feature", "Decision"],
-                allowed_relationships=[
-                    ("Person", "WORKS_AT", "Company"),
-                    ("Person", "LEADS", "System"),
-                    ("Company", "USES", "System"),
-                    ("System", "DEPENDS_ON", "Technology"),
-                    ("Issue", "AFFECTS", "Company"),
-                    ("Issue", "BLOCKS", "Feature"),
-                    ("Decision", "ADDRESSES", "Issue"),
-                    ("Person", "MAKES", "Decision")
-                ],
-                node_properties=["priority", "status", "date", "impact"]
-            )
+            # Initialize domain-agnostic Graph Transformer
+            self.llm_graph_transformer = self._create_domain_adaptive_transformer()
         
         # Initialize text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -86,6 +73,135 @@ class GraphRAG:
         
         # Entity resolution mappings
         self.entity_mappings = {}
+    
+    def _sanitize_domain_hint(self, domain_hint: str) -> str:
+        """Sanitize and validate domain hint to prevent malicious inputs"""
+        if not domain_hint or not isinstance(domain_hint, str):
+            return None
+            
+        # Remove potentially harmful content
+        domain_hint = domain_hint.strip().lower()
+        
+        # Check for suspicious patterns that might confuse the LLM
+        malicious_patterns = [
+            r'ignore\s+previous\s+instructions',
+            r'system\s+prompt',
+            r'override\s+instructions',
+            r'jailbreak',
+            r'pretend\s+you\s+are',
+            r'act\s+as\s+if',
+            r'forget\s+everything',
+            r'new\s+instructions',
+            r'admin\s+mode',
+            r'developer\s+mode'
+        ]
+        
+        for pattern in malicious_patterns:
+            if re.search(pattern, domain_hint, re.IGNORECASE):
+                print(f"⚠️ Suspicious domain hint detected, reverting to auto-detection: {domain_hint}")
+                return None
+        
+        # Validate against known good domains
+        valid_domains = [
+            'business', 'enterprise', 'technology', 'software', 'engineering',
+            'medical', 'healthcare', 'pharmaceutical', 'clinical',
+            'legal', 'law', 'compliance', 'regulatory',
+            'academic', 'research', 'scientific', 'education',
+            'finance', 'banking', 'investment', 'economics',
+            'manufacturing', 'industrial', 'supply chain',
+            'retail', 'ecommerce', 'marketing', 'sales',
+            'government', 'public sector', 'policy',
+            'media', 'journalism', 'publishing', 'content'
+        ]
+        
+        # Check if domain hint contains valid domain keywords
+        if any(domain in domain_hint for domain in valid_domains):
+            # Limit length to prevent injection
+            return domain_hint[:50] if len(domain_hint) <= 50 else None
+        
+        print(f"💡 Domain hint '{domain_hint}' not recognized, using auto-detection")
+        return None
+    
+    def _create_domain_adaptive_transformer(self):
+        """Create a domain-adaptive LLM Graph Transformer"""
+        if self.domain_hint:
+            print(f"🎯 Using domain hint: {self.domain_hint}")
+            return self._create_domain_specific_transformer(self.domain_hint)
+        else:
+            print("🔍 Using domain-agnostic configuration")
+            return self._create_generic_transformer()
+    
+    def _create_generic_transformer(self):
+        """Create a fully domain-agnostic transformer that lets LLM decide everything"""
+        return LLMGraphTransformer(
+            llm=self.llm,
+            # No restrictions - let LLM discover entities and relationships naturally
+            allowed_nodes=[],
+            allowed_relationships=[],
+            # Generic properties that work across domains
+            node_properties=["type", "description", "importance", "category"]
+        )
+    
+    def _create_domain_specific_transformer(self, domain_hint: str):
+        """Create a transformer with domain-specific guidance"""
+        domain_configs = {
+            'business': {
+                'nodes': ["Person", "Company", "System", "Technology", "Issue", "Feature", "Decision", "Process"],
+                'relationships': [
+                    ("Person", "WORKS_AT", "Company"),
+                    ("Person", "LEADS", "System"),
+                    ("Company", "USES", "System"),
+                    ("System", "DEPENDS_ON", "Technology"),
+                    ("Issue", "AFFECTS", "Company"),
+                    ("Decision", "ADDRESSES", "Issue")
+                ]
+            },
+            'medical': {
+                'nodes': ["Patient", "Disease", "Treatment", "Symptom", "Drug", "Procedure", "Doctor", "Hospital"],
+                'relationships': [
+                    ("Treatment", "TREATS", "Disease"),
+                    ("Drug", "PRESCRIBED_FOR", "Disease"),
+                    ("Symptom", "INDICATES", "Disease"),
+                    ("Doctor", "PERFORMS", "Procedure"),
+                    ("Patient", "DIAGNOSED_WITH", "Disease")
+                ]
+            },
+            'legal': {
+                'nodes': ["Case", "Law", "Court", "Party", "Judge", "Attorney", "Statute", "Precedent"],
+                'relationships': [
+                    ("Case", "CITES", "Law"),
+                    ("Case", "ESTABLISHES", "Precedent"),
+                    ("Attorney", "REPRESENTS", "Party"),
+                    ("Judge", "PRESIDES_OVER", "Case"),
+                    ("Court", "DECIDES", "Case")
+                ]
+            },
+            'academic': {
+                'nodes': ["Author", "Paper", "Theory", "Method", "Dataset", "Institution", "Field", "Concept"],
+                'relationships': [
+                    ("Author", "PUBLISHED", "Paper"),
+                    ("Paper", "PROPOSES", "Theory"),
+                    ("Paper", "USES", "Method"),
+                    ("Author", "AFFILIATED_WITH", "Institution"),
+                    ("Paper", "BELONGS_TO", "Field")
+                ]
+            }
+        }
+        
+        # Find best matching domain config
+        for domain, config in domain_configs.items():
+            if domain in domain_hint:
+                print(f"📋 Using {domain} domain configuration")
+                return LLMGraphTransformer(
+                    llm=self.llm,
+                    allowed_nodes=config['nodes'],
+                    allowed_relationships=config['relationships'],
+                    node_properties=["type", "description", "importance", "status", "date"]
+                )
+        
+        # If no specific domain match, fall back to generic
+        print("🔍 No specific domain match, using generic configuration")
+        return self._create_generic_transformer()
     
     def _create_schema(self):
         """Create knowledge graph schema in Kuzu"""
@@ -316,7 +432,9 @@ class GraphRAG:
                 content = file.read()
             
             # Store document
-            doc_id = f"doc_{file_path.stem}"
+            # Sanitize filename for safe IDs
+            safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', file_path.stem)
+            doc_id = f"doc_{safe_filename}"
             try:
                 self.conn.execute(
                     "CREATE (:Document {id: $doc_id, filename: $filename, content: $content})",
@@ -329,7 +447,9 @@ class GraphRAG:
             # Chunk document
             chunks = self.text_splitter.split_text(content)
             for i, chunk in enumerate(chunks):
-                chunk_id = f"{file_path.stem}_chunk_{i}"
+                # Sanitize filename for safe IDs
+                safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', file_path.stem)
+                chunk_id = f"{safe_filename}_chunk_{i}"
                 embedding = self.embedding_model.encode(chunk).tolist()
                 token_count = len(tiktoken.get_encoding("cl100k_base").encode(chunk))
                 

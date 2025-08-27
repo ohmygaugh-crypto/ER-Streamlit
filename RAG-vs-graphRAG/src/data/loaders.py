@@ -9,7 +9,7 @@ from ..system.initialization import check_graph_database_content
 
 def load_sample_data(trad_rag, graph_rag):
     """Load and process sample enterprise data"""
-    data_dir = Path(__file__).parent.parent.parent / "data"
+    data_dir = Path(__file__).parent.parent.parent / "sample_data"
     
     # Check if GraphRAG database already has data
     chunk_count, entity_count = check_graph_database_content(graph_rag)

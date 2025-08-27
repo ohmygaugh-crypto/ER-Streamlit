@@ -19,7 +19,7 @@ def manage_session_state():
         st.session_state.current_api_key = None
 
 
-def handle_api_key_setup(openai_api_key):
+def handle_api_key_setup(openai_api_key, domain_hint=None):
     """Handle API key setup and system initialization"""
     # Check if API key changed - reinitialize systems if needed
     api_key_changed = st.session_state.current_api_key != openai_api_key
@@ -40,7 +40,7 @@ def handle_api_key_setup(openai_api_key):
         api_key_hash = hashlib.md5("none".encode()).hexdigest()[:8]  # Always use "none" for import-only mode
         
         # Initialize systems with fresh database (cached)
-        trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
+        trad_rag, graph_rag = initialize_rag_systems(api_key_hash, domain_hint)
         st.session_state.trad_rag = trad_rag
         st.session_state.graph_rag = graph_rag
         st.session_state.systems_initialized = True

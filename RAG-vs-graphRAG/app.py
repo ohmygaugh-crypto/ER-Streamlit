@@ -36,16 +36,22 @@ def main():
                                           help="Required for LLM-powered answers",
                                           key="main_api_key")
     
-    trad_rag, graph_rag = handle_api_key_setup(openai_api_key)
+    # Optional domain hint for LLM ontology extraction
+    domain_hint = st.sidebar.text_input("Domain/Industry (optional)", 
+                                       placeholder="e.g., medical, legal, business",
+                                       help="Hint to guide entity extraction. Leave blank for auto-detection.",
+                                       key="domain_hint")
+    
+    trad_rag, graph_rag = handle_api_key_setup(openai_api_key, domain_hint)
     
     # Render sidebar with data loading and export functionality
-    render_sidebar(openai_api_key, trad_rag, graph_rag)
+    render_sidebar(openai_api_key, trad_rag, graph_rag, domain_hint)
     
     # Render main content: demo scenarios and question input
     custom_question, show_graph_viz = render_demo_scenarios()
     
     # Render comparison interface
-    render_comparison_interface(custom_question, openai_api_key)
+    render_comparison_interface(custom_question, openai_api_key, domain_hint)
 
 
 if __name__ == "__main__":

@@ -11,19 +11,19 @@ from ...data.importers import import_graph_data
 from ...data.exporters import export_kuzu_database, export_pinecone_format, export_neo4j_format
 
 
-def render_sidebar(openai_api_key, trad_rag, graph_rag):
+def render_sidebar(openai_api_key, trad_rag, graph_rag, domain_hint=None):
     """Render the complete sidebar"""
     st.sidebar.title("Configuration")
     st.sidebar.markdown("---")
     
     # Data loading controls
-    render_data_loading_section(openai_api_key, trad_rag, graph_rag)
+    render_data_loading_section(openai_api_key, trad_rag, graph_rag, domain_hint)
     
     # Export functionality
     render_export_section(trad_rag, graph_rag)
 
 
-def render_data_loading_section(openai_api_key, trad_rag, graph_rag):
+def render_data_loading_section(openai_api_key, trad_rag, graph_rag, domain_hint=None):
     """Render the data loading section"""
     st.sidebar.markdown("### 📂 Data Loading")
     
@@ -38,8 +38,8 @@ def render_data_loading_section(openai_api_key, trad_rag, graph_rag):
                 
                 api_key_hash = hashlib.md5(openai_api_key.encode()).hexdigest()[:8]
                 
-                # Get fresh systems with API key
-                trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
+                # Get fresh systems with API key and domain hint
+                trad_rag, graph_rag = initialize_rag_systems(api_key_hash, domain_hint)
                 st.session_state.trad_rag = trad_rag
                 st.session_state.graph_rag = graph_rag
                 st.session_state.current_api_key = openai_api_key

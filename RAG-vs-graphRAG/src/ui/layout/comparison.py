@@ -14,7 +14,7 @@ from ..visualizations import (
 )
 
 
-def render_comparison_interface(custom_question, openai_api_key):
+def render_comparison_interface(custom_question, openai_api_key, domain_hint=None):
     """Render the main comparison interface"""
     st.markdown("## 🎯 RAG vs GraphRAG Comparison")
     st.markdown("---")
@@ -24,7 +24,7 @@ def render_comparison_interface(custom_question, openai_api_key):
         render_method_preview(openai_api_key)
     
     # Main comparison button and logic
-    handle_comparison_execution(custom_question, openai_api_key)
+    handle_comparison_execution(custom_question, openai_api_key, domain_hint)
 
 
 def render_method_preview(openai_api_key):
@@ -54,7 +54,7 @@ def render_method_preview(openai_api_key):
         st.info("💡 1st Import your own data via sidebar OR enter API key'")
 
 
-def handle_comparison_execution(custom_question, openai_api_key):
+def handle_comparison_execution(custom_question, openai_api_key, domain_hint=None):
     """Handle the comparison execution logic"""
     if st.button("🚀 Run Comparison", type="primary"):
         question = custom_question.strip()
@@ -72,7 +72,7 @@ def handle_comparison_execution(custom_question, openai_api_key):
                 api_key_hash = hashlib.md5(openai_api_key.encode()).hexdigest()[:8]
                 
                 # Get fresh systems with API key
-                trad_rag, graph_rag = initialize_rag_systems(api_key_hash)
+                trad_rag, graph_rag = initialize_rag_systems(api_key_hash, domain_hint)
                 st.session_state.trad_rag = trad_rag
                 st.session_state.graph_rag = graph_rag
                 st.session_state.current_api_key = openai_api_key

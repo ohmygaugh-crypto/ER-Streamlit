@@ -3,6 +3,7 @@ Traditional RAG Implementation
 Chunks text, creates embeddings, and performs similarity search
 """
 import os
+import re
 from typing import List, Dict, Any
 from pathlib import Path
 import pandas as pd
@@ -69,8 +70,10 @@ class TraditionalRAG:
             text_chunks = self.text_splitter.split_text(doc['content'])
             
             for i, chunk in enumerate(text_chunks):
+                # Sanitize filename for safe IDs
+                safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', Path(doc['filename']).stem)
                 chunks.append({
-                    'chunk_id': f"{doc['filename']}_chunk_{i}",
+                    'chunk_id': f"{safe_filename}_chunk_{i}",
                     'content': chunk,
                     'filename': doc['filename'],
                     'filepath': doc['filepath'],
