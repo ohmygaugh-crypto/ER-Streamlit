@@ -6,7 +6,7 @@ import streamlit as st
 import hashlib
 from ...system.initialization import initialize_rag_systems
 from ...system.session_state import clear_session_state
-from ...data.loaders import load_sample_data
+from ...data.loaders import load_sample_data, process_uploaded_files
 from ...data.importers import import_graph_data
 from ...data.exporters import export_kuzu_database, export_pinecone_format, export_neo4j_format
 
@@ -50,18 +50,41 @@ def render_data_loading_section(openai_api_key, trad_rag, graph_rag, domain_hint
         else:
             st.sidebar.info("💡 Enter API key above, then click 'Run Comparison' to auto-load sample data")
         
-        # Alternative option: Import data
+        # Alternative option: Upload custom documents
         st.sidebar.markdown("**OR**")
-        uploaded_file = st.sidebar.file_uploader(
-            "📤 Upload JSON 'Knowledge Graph' Array", 
-            type=['json'],
-            help="Upload a previously exported, or kuzudb compatible, graph database JSON file (no API key needed)"
+        uploaded_files = st.sidebar.file_uploader(
+            "📄 Upload Your Own Documents", 
+            type=['txt'],
+            accept_multiple_files=True,
+            help="Upload .txt files to analyze with AI-generated scenarios"
         )
         
-        if uploaded_file is not None:
-            if st.sidebar.button("⏏️ Import Uploaded Data"):
-                if trad_rag and graph_rag and import_graph_data(uploaded_file, trad_rag, graph_rag):
+        if uploaded_files:
+            if st.sidebar.button("🤖 Process Custom Documents"):
+                result = process_uploaded_files(uploaded_files, trad_rag, graph_rag)
+                if result["success"]:
+                    # Store AI-generated scenarios in session state
+                    st.session_state.custom_scenarios = result["scenarios"]
+                    st.session_state.content_summary = result["content_summary"]
                     st.session_state.data_loaded = True
+                    st.session_state.using_custom_data = True
+                    st.rerun()
+                else:
+                    st.sidebar.error(f"Failed to process files: {result.get('error', 'Unknown error')}")
+        
+        # JSON Import option
+        st.sidebar.markdown("**OR**")
+        json_file = st.sidebar.file_uploader(
+            "📊 Import Knowledge Graph (JSON)", 
+            type=['json'],
+            help="Upload exported JSON data to load into the system"
+        )
+        
+        if json_file is not None:
+            if st.sidebar.button("⏏️ Import Knowledge Graph"):
+                if trad_rag and graph_rag and import_graph_data(json_file, trad_rag, graph_rag):
+                    st.session_state.data_loaded = True
+                    st.session_state.using_custom_data = False  # Imported data uses static scenarios
                     st.rerun()
                 else:
                     st.sidebar.error("Failed to import data. Please try again.")

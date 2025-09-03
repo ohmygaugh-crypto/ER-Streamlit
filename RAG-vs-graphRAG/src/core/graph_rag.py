@@ -558,6 +558,99 @@ class GraphRAG:
         
         print("✅ Graph data loaded successfully!")
     
+    def load_documents_from_content(self, documents_with_content):
+        """Load documents from content already in memory (for uploaded files)"""
+        all_entities = []
+        all_relationships = []
+        
+        for doc in documents_with_content:
+            content = doc['content']
+            filename = doc['filename']
+            
+            try:
+                # Sanitize filename for safe IDs
+                safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', Path(filename).stem)
+                doc_id = f"doc_{safe_filename}"
+                
+                # Store document
+                try:
+                    self.conn.execute(
+                        "CREATE (d:Document {id: $doc_id, filename: $filename, content: $content})",
+                        parameters={'doc_id': doc_id, 'filename': filename, 'content': content[:10000]}  # Limit content length
+                    )
+                except Exception:
+                    # Document might already exist, skip
+                    pass
+                
+                # Chunk document
+                chunks = self.text_splitter.split_text(content)
+                for i, chunk in enumerate(chunks):
+                    # Sanitize filename for safe IDs
+                    safe_filename = re.sub(r'[^a-zA-Z0-9_]', '_', Path(filename).stem)
+                    chunk_id = f"{safe_filename}_chunk_{i}"
+                    embedding = self.embedding_model.encode(chunk).tolist()
+                    token_count = len(tiktoken.get_encoding("cl100k_base").encode(chunk))
+                    
+                    # Store chunk
+                    try:
+                        self.conn.execute(
+                            "CREATE (c:Chunk {id: $chunk_id, content: $content, embedding: $embedding, tokens: $tokens, document_id: $doc_id})",
+                            parameters={
+                                'chunk_id': chunk_id,
+                                'content': chunk,
+                                'embedding': embedding,
+                                'tokens': token_count,
+                                'doc_id': doc_id
+                            }
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Chunk {chunk_id} might already exist: {e}")
+                        continue
+                    
+                    # Extract entities and relationships using LLM if available
+                    if self.llm:
+                        entities, relationships = self.extract_entities_with_langchain(chunk, filename)
+                        
+                        # Add to collections for batch processing
+                        all_entities.extend(entities)
+                        all_relationships.extend(relationships)
+                        
+                        # Process entities
+                        for entity in entities:
+                            entity_id = f"entity_{re.sub(r'[^a-zA-Z0-9_]', '_', entity.lower())}"
+                            try:
+                                self.conn.execute(
+                                    "CREATE (e:Entity {id: $entity_id, name: $name, type: $type})",
+                                    parameters={'entity_id': entity_id, 'name': entity, 'type': 'EXTRACTED'}
+                                )
+                            except Exception:
+                                pass  # Entity might already exist
+                            
+                            # Create MENTIONS relationship
+                            try:
+                                self.conn.execute(
+                                    "MATCH (c:Chunk {id: $chunk_id}), (e:Entity {id: $entity_id}) CREATE (c)-[:MENTIONS {frequency: 1}]->(e)",
+                                    parameters={'chunk_id': chunk_id, 'entity_id': entity_id}
+                                )
+                            except Exception:
+                                pass
+                    else:
+                        print(f"❌ No LLM available - cannot extract entities for {filename}")
+                        print(f"❌ Set OPENAI_API_KEY to get proper LLM-generated relationships")
+            
+            except Exception as e:
+                print(f"❌ Error processing {filename}: {e}")
+                continue
+        
+        # Resolve entities and create relationships
+        if all_entities and all_relationships:
+            resolved_entities = self.resolve_entities(all_entities)
+            self._create_entity_relationships(all_relationships)
+            print(f"Knowledge graph built with {len(resolved_entities)} entities and {len(all_relationships)} relationships")
+        
+        print(f"✅ Loaded {len(documents_with_content)} uploaded documents")
+        return True
+    
     def graph_enhanced_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Perform graph-enhanced retrieval"""
         # Extract entities from query using LLM

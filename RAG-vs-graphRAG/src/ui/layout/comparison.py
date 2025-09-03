@@ -19,12 +19,16 @@ def render_comparison_interface(custom_question, openai_api_key, domain_hint=Non
     st.markdown("## 🎯 RAG vs GraphRAG Comparison")
     st.markdown("---")
     
-    # Show preview of what will be compared
+    # Show different UI based on processing state
     if not st.session_state.data_loaded:
         render_method_preview(openai_api_key)
-    
-    # Main comparison button and logic
-    handle_comparison_execution(custom_question, openai_api_key, domain_hint)
+        handle_data_processing(openai_api_key, domain_hint)
+    elif not st.session_state.get('data_processed', False):
+        st.info("🔄 Data loaded but not processed. Click 'Process Data' to continue.")
+        handle_data_processing(openai_api_key, domain_hint)
+    else:
+        # Data is processed, show query interface
+        handle_query_execution(custom_question, openai_api_key)
 
 
 def render_method_preview(openai_api_key):
@@ -54,15 +58,17 @@ def render_method_preview(openai_api_key):
         st.info("💡 1st Import your own data via sidebar OR enter API key'")
 
 
-def handle_comparison_execution(custom_question, openai_api_key, domain_hint=None):
-    """Handle the comparison execution logic"""
-    if st.button("🚀 Run Comparison", type="primary"):
-        question = custom_question.strip()
-        if not question:
-            st.warning("Please enter a question.")
-            return
+def handle_data_processing(openai_api_key, domain_hint=None):
+    """Handle the data processing step (Step 1)"""
+    # Disable button if already processing or processed
+    processing_disabled = st.session_state.get('data_processed', False)
+    button_text = "✅ Data Processed" if processing_disabled else "🔄 Process Data"
+    
+    if st.button(button_text, type="primary", disabled=processing_disabled):
+        # Set processing flag immediately to prevent double-clicks
+        st.session_state.data_processed = True
         
-        # Handle data loading logic when Run Comparison is clicked
+        # Handle data loading logic when Process Data is clicked
         if not st.session_state.data_loaded:
             if openai_api_key:
                 # User has API key - load sample data automatically
@@ -80,13 +86,25 @@ def handle_comparison_execution(custom_question, openai_api_key, domain_hint=Non
                 # Load sample data
                 if load_sample_data(trad_rag, graph_rag):
                     st.session_state.data_loaded = True
-                    st.success("✅ Sample data loaded successfully!")
+                    st.rerun()  # Refresh to show question section
                 else:
                     st.error("❌ Failed to load sample data")
                     return
             else:
                 # No API key and no data - can't run comparison
                 st.error("❌ Please either upload data via sidebar or enter an API key to use sample data")
+                return
+        else:
+            # Data already loaded, processing complete
+            st.rerun()
+
+
+def handle_query_execution(custom_question, openai_api_key):
+    """Handle the query execution step (Step 2)"""
+    if st.button("🚀 Run Comparison", type="primary"):
+        question = custom_question.strip()
+        if not question:
+            st.warning("Please enter a question.")
             return
         
         # Execute the comparison

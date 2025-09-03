@@ -17,10 +17,23 @@ def manage_session_state():
         st.session_state.systems_initialized = False
     if 'current_api_key' not in st.session_state:
         st.session_state.current_api_key = None
+    if 'using_custom_data' not in st.session_state:
+        st.session_state.using_custom_data = False
+    if 'custom_scenarios' not in st.session_state:
+        st.session_state.custom_scenarios = []
+    if 'content_summary' not in st.session_state:
+        st.session_state.content_summary = ""
+    if 'current_domain_hint' not in st.session_state:
+        st.session_state.current_domain_hint = ""
+    if 'data_processed' not in st.session_state:
+        st.session_state.data_processed = False
 
 
 def handle_api_key_setup(openai_api_key, domain_hint=None):
     """Handle API key setup and system initialization"""
+    # Store domain hint in session state (using different key to avoid widget conflict)
+    st.session_state.current_domain_hint = domain_hint or ""
+    
     # Check if API key changed - reinitialize systems if needed
     api_key_changed = st.session_state.current_api_key != openai_api_key
     
@@ -63,7 +76,13 @@ def handle_api_key_setup(openai_api_key, domain_hint=None):
 
 def clear_session_state():
     """Clear all session state and restart"""
-    # Clear session state
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+    # Clear specific state variables while preserving others like widget states
+    keys_to_clear = [
+        'data_loaded', 'systems_initialized', 'current_api_key',
+        'using_custom_data', 'custom_scenarios', 'content_summary',
+        'trad_rag', 'graph_rag', 'data_processed'
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
     st.rerun()

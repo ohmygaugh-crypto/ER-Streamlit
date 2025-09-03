@@ -5,7 +5,7 @@ Handles all UI layout and visualization components
 
 # Import layout components
 from .layout.sidebar import render_sidebar
-from .layout.demo_scenarios import render_demo_scenarios, get_demo_scenarios  
+from .layout.demo_scenarios import render_demo_scenarios, get_demo_scenarios_for_domain  
 from .layout.comparison import render_comparison_interface
 
 # Import visualization components
@@ -18,7 +18,7 @@ from .visualizations import (
 __all__ = [
     'render_sidebar',
     'render_demo_scenarios',
-    'get_demo_scenarios',
+    'get_demo_scenarios_for_domain',
     'render_comparison_interface',
     'render_traditional_rag_visualization',
     'render_graph_rag_visualization', 
