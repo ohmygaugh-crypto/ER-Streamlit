@@ -1,0 +1,20 @@
+# Core Streamlit and Data Processing
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Network Analysis
+networkx>=3.1.0
+
+# Visualization
+plotly>=5.15.0
+
+# Interactive network visualization
+st-link-analysis>=0.1.0
+
+# Data processing and utilities
+scikit-learn>=1.3.0
+tqdm>=4.65.0
+
+# Development dependencies
+pytest>=7.0.0
