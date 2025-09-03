@@ -2,7 +2,6 @@
 Network graph visualization component
 """
 import streamlit as st
-import json
 from typing import Dict, List, Any
 
 # Import optional dependencies through centralized checker
@@ -60,12 +59,6 @@ def render_network_graph(elements: Dict[str, List[Dict]], config: Dict[str, Any]
     else:
         st.warning("📦 Interactive graph not available. Install `st-link-analysis` for full visualization.")
         _render_fallback_graph_info(elements, stats)
-    
-    # Network statistics
-    _render_network_stats(elements, stats)
-    
-    # Export functionality
-    _render_export_section(elements)
 
 
 def _render_fallback_graph_info(elements: Dict[str, List[Dict]], stats: Dict[str, Any]):
@@ -118,69 +111,7 @@ def _render_fallback_graph_info(elements: Dict[str, List[Dict]], stats: Dict[str
         st.dataframe(connection_data, use_container_width=True)
 
 
-def _render_network_stats(elements: Dict[str, List[Dict]], stats: Dict[str, Any]):
-    """Render network analysis statistics"""
-    st.markdown("#### 📊 Network Metrics")
-    
-    n_nodes = len(elements["nodes"])
-    n_edges = len(elements["edges"])
-    n_orders = stats["n_orders"]
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Orders", f"{n_orders:,}")
-    
-    with col2:
-        st.metric("Connected Products", n_nodes)
-    
-    with col3:
-        st.metric("Product Pairs", n_edges)
-    
-    with col4:
-        if n_nodes > 1:
-            max_edges = n_nodes * (n_nodes - 1) / 2
-            density = n_edges / max_edges
-            st.metric("Network Density", f"{density:.1%}")
 
 
-def _render_export_section(elements: Dict[str, List[Dict]]):
-    """Render graph export functionality"""
-    st.markdown("#### 💾 Export Network")
-    
-    graph_json = json.dumps(elements, indent=2)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.download_button(
-            label="📄 Download Graph JSON",
-            data=graph_json,
-            file_name="product_network.json",
-            mime="application/json",
-            help="Download network data as JSON for external analysis"
-        )
-    
-    with col2:
-        # Create simple edge list for analysis tools
-        edge_list = []
-        for edge in elements["edges"]:
-            edge_list.append({
-                "source": edge["data"]["source"],
-                "target": edge["data"]["target"],
-                "lift": edge["data"]["lift"],
-                "support": edge["data"]["support_ab"],
-                "co_count": edge["data"]["co_count"]
-            })
-        
-        import pandas as pd
-        edge_df = pd.DataFrame(edge_list)
-        csv_data = edge_df.to_csv(index=False)
-        
-        st.download_button(
-            label="📊 Download Edge List CSV",
-            data=csv_data,
-            file_name="product_connections.csv",
-            mime="text/csv",
-            help="Download edge list for network analysis tools"
-        )
+
+
