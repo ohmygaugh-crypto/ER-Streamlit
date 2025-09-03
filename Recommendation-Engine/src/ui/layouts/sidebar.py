@@ -3,6 +3,12 @@ Sidebar layout with data source controls and network parameters
 """
 import streamlit as st
 from typing import Dict, Any
+from ...utils import (
+    parse_persona_file, 
+    parse_grocery_list,
+    extract_persona_from_json, 
+    normalize_persona_fields
+)
 
 
 def render_sidebar() -> Dict[str, Any]:
@@ -29,6 +35,16 @@ def render_sidebar() -> Dict[str, Any]:
             type=["csv"],
             help="CSV with columns: order_id, customer_id, order_timestamp, product_id, product_name, category, price, quantity"
         )
+    
+    st.sidebar.divider()
+    
+    # Customer persona section
+    _render_persona_section()
+    
+    st.sidebar.divider()
+    
+    # Grocery list section
+    _render_grocery_list_section()
     
     st.sidebar.divider()
     
@@ -140,3 +156,359 @@ def render_sidebar() -> Dict[str, Any]:
         "layout_choice": layout_choice,
         "show_communities": show_communities
     }
+
+
+def _render_grocery_list_section():
+    """Render grocery list upload and tracking section"""
+    st.sidebar.subheader("📝 Grocery List Tracker")
+    
+    # File upload for grocery list
+    uploaded_list = st.sidebar.file_uploader(
+        "Upload Grocery List",
+        type=["json", "md", "txt"],
+        help="Upload a grocery list in JSON, Markdown, or text format",
+        key="grocery_list_upload"
+    )
+    
+    # Parse and store grocery list
+    if uploaded_list is not None:
+        _parse_and_store_grocery_list(uploaded_list)
+    
+    # Display current grocery list with strikethrough for items in cart
+    _display_grocery_list_with_progress()
+
+
+def _parse_and_store_grocery_list(uploaded_file):
+    """Parse uploaded grocery list and store in session state using centralized utils"""
+    try:
+        grocery_items = parse_grocery_list(uploaded_file)
+        
+        if grocery_items:
+            # Store in session state
+            st.session_state.grocery_list = grocery_items
+            st.sidebar.success(f"✅ Loaded {len(grocery_items)} items from grocery list!")
+        else:
+            st.sidebar.error("❌ Could not parse grocery list")
+        
+    except Exception as e:
+        st.sidebar.error(f"❌ Error parsing grocery list: {str(e)}")
+
+
+def _display_grocery_list_with_progress():
+    """Display grocery list with strikethrough for items in cart and green upsells"""
+    grocery_list = st.session_state.get("grocery_list", [])
+    
+    if not grocery_list:
+        st.sidebar.info("📋 Upload a grocery list to track your shopping progress!")
+        return
+    
+    # Get current cart items and selected recommendations
+    cart_items = st.session_state.get("cart_items", [])
+    selected_recs = st.session_state.get("selected_recommendations", [])
+    
+    # Convert cart items to product names for matching
+    cart_product_names = []
+    cart_product_names_with_display = []  # Keep both original and display names
+    
+    for item_display_name in cart_items:
+        # Extract product name from display name (e.g., "Apples (Produce) - $0.79" -> "Apples")
+        product_name = item_display_name.split(" (")[0].strip()
+        cart_product_names.append(product_name.lower())
+        cart_product_names_with_display.append({
+            'name': product_name,
+            'display': item_display_name,
+            'lower': product_name.lower()
+        })
+    
+    # Create sets for faster lookup
+    grocery_items_lower = {item.strip().lower() for item in grocery_list}
+    
+    # Display grocery list with progress
+    st.sidebar.markdown("**📋 Your Shopping Progress:**")
+    
+    completed_items = 0
+    total_items = len(grocery_list)
+    upsell_items = []
+    
+    # First, show original grocery list items
+    for item in grocery_list:
+        item_name = item.strip()
+        item_lower = item_name.lower()
+        
+        # Check if this grocery item matches any cart item (fuzzy matching)
+        is_in_cart = any(
+            item_lower in cart_info['lower'] or cart_info['lower'] in item_lower
+            for cart_info in cart_product_names_with_display
+        )
+        
+        if is_in_cart:
+            # Strikethrough for items in cart
+            st.sidebar.markdown(f"~~{item_name}~~ ✅")
+            completed_items += 1
+        else:
+            # Regular text for items not in cart
+            st.sidebar.markdown(f"• {item_name}")
+    
+    # Now show upsell items (items in cart that weren't on the original grocery list)
+    for cart_info in cart_product_names_with_display:
+        cart_name = cart_info['name']
+        cart_lower = cart_info['lower']
+        
+        # Check if this cart item was NOT on the original grocery list
+        is_original_item = any(
+            cart_lower in grocery_lower or grocery_lower in cart_lower
+            for grocery_lower in grocery_items_lower
+        )
+        
+        # Check if this was added via recommendation (from selected_recommendations)
+        is_recommendation = cart_name in selected_recs
+        
+        if not is_original_item:
+            upsell_items.append({
+                'name': cart_name,
+                'is_recommendation': is_recommendation
+            })
+    
+    # Display upsell items
+    if upsell_items:
+        st.sidebar.markdown("**🎯 Smart Upsells:**")
+        for upsell in upsell_items:
+            if upsell['is_recommendation']:
+                # Green text with + for AI-recommended upsells
+                st.sidebar.markdown(f":green[+ {upsell['name']} (AI Recommended) 🤖]")
+            else:
+                # Different color for manual additions
+                st.sidebar.markdown(f":blue[+ {upsell['name']} (Manual Add)]")
+    
+    # Enhanced progress display
+    _display_enhanced_progress(completed_items, total_items, len(upsell_items), 
+                              sum(1 for u in upsell_items if u['is_recommendation']))
+
+
+def _display_enhanced_progress(completed_items: int, total_items: int, 
+                              total_upsells: int, ai_upsells: int):
+    """Display enhanced progress with original list completion and upsell metrics"""
+    
+    # Original grocery list progress
+    if total_items > 0:
+        progress_pct = (completed_items / total_items) * 100
+        st.sidebar.progress(completed_items / total_items)
+        st.sidebar.caption(f"Original List: {completed_items}/{total_items} items ({progress_pct:.1f}%)")
+        
+        # Completion status for original list
+        if completed_items == total_items:
+            st.sidebar.success("🎉 Grocery list completed!")
+        elif completed_items > 0:
+            st.sidebar.info(f"🛒 {total_items - completed_items} items remaining")
+    
+    # Upsell metrics
+    if total_upsells > 0:
+        st.sidebar.markdown("---")
+        
+        # Upsell breakdown
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.metric("🎯 Total Upsells", total_upsells)
+        with col2:
+            st.metric("🤖 AI Suggested", ai_upsells)
+        
+        # Calculate upsell value (if we have pricing)
+        if ai_upsells > 0:
+            ai_percentage = (ai_upsells / total_upsells) * 100
+            st.sidebar.caption(f"AI Success Rate: {ai_percentage:.1f}% of upsells")
+        
+        # Show total impact
+        total_cart_items = completed_items + total_upsells
+        if total_items > 0:
+            basket_growth = (total_upsells / total_items) * 100
+            st.sidebar.info(f"📈 Basket Growth: +{basket_growth:.1f}% ({total_upsells} extra items)")
+    
+    # Overall shopping summary
+    if total_items > 0 and total_upsells > 0:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**📊 Shopping Summary:**")
+        st.sidebar.markdown(f"• ✅ Original items: {completed_items}")
+        st.sidebar.markdown(f"• 🎯 Upsells added: {total_upsells}")
+        st.sidebar.markdown(f"• 🤖 AI-driven upsells: {ai_upsells}")
+        
+        total_cart = completed_items + total_upsells
+        st.sidebar.markdown(f"• 🛒 **Total cart: {total_cart} items**")
+
+
+def _render_persona_section():
+    """Render customer persona upload and configuration section"""
+    st.sidebar.subheader("👤 Customer Persona")
+    
+    # Persona upload
+    uploaded_persona = st.sidebar.file_uploader(
+        "Upload Customer Profile",
+        type=["json", "csv"],
+        help="JSON from health/shopping apps or CSV with customer profile data",
+        key="persona_upload"
+    )
+    
+    # Show format preference hint
+    st.sidebar.caption("💡 **Recommended**: JSON format from health/shopping apps (MyFitnessPal, Instacart, etc.)")
+    
+    # Parse and store persona data
+    if uploaded_persona is not None:
+        _parse_and_store_persona(uploaded_persona)
+    
+    # Display current persona summary
+    _display_persona_summary()
+    
+    # Manual persona configuration (fallback/override)
+    with st.sidebar.expander("⚙️ Manual Persona Override", expanded=False):
+        _render_manual_persona_config()
+
+
+def _parse_and_store_persona(uploaded_file):
+    """Parse uploaded persona JSON/CSV and store in session state using centralized utils"""
+    try:
+        persona = parse_persona_file(uploaded_file)
+        
+        if persona:
+            # Store in session state
+            st.session_state.customer_persona = persona
+            customer_name = persona.get('name', persona.get('customer_id', 'Unknown'))
+            st.sidebar.success(f"✅ Loaded profile for: {customer_name}")
+            
+            # Show data source if available
+            data_source = persona.get('data_source', 'Unknown')
+            if data_source != 'Unknown':
+                st.sidebar.info(f"📱 Data from: {data_source}")
+        else:
+            st.sidebar.error("❌ Could not parse persona data")
+        
+    except Exception as e:
+        st.sidebar.error(f"❌ Error parsing profile data: {str(e)}")
+        st.sidebar.info("💡 Try JSON format from health/shopping apps, or CSV with required columns")
+
+
+# ============================================================================
+# REFACTORED: Persona parsing functions moved to utils/
+# ============================================================================
+# 
+# The following functions have been moved to centralized utilities:
+# 
+# OLD LOCATION -> NEW LOCATION:
+# - _extract_persona_from_json -> utils.persona_parser.extract_persona_from_json
+# - _normalize_persona_fields -> utils.persona_parser.normalize_persona_fields
+# - _parse_and_store_grocery_list -> uses utils.persona_parser.parse_grocery_list
+# - _parse_and_store_persona -> uses utils.persona_parser.parse_persona_file
+#
+# This provides better code organization, reusability, and testing capabilities.
+# ============================================================================
+
+# All deprecated functions removed - now using centralized utils
+
+
+def _display_persona_summary():
+    """Display current persona summary"""
+    persona = st.session_state.get("customer_persona")
+    
+    if not persona:
+        st.sidebar.info("👤 Upload persona data or configure manually to enable personalized recommendations")
+        return
+    
+    st.sidebar.markdown("**👤 Active Customer Profile:**")
+    
+    # Customer ID and basic info
+    customer_id = persona.get('customer_id', 'Unknown')
+    st.sidebar.markdown(f"**ID:** {customer_id}")
+    
+    # Diet and allergies
+    allergies = persona.get('allergies', [])
+    diet_prefs = persona.get('diet_preferences', [])
+    
+    if allergies:
+        st.sidebar.markdown(f"🚫 **Allergies:** {', '.join(allergies)}")
+    if diet_prefs:
+        st.sidebar.markdown(f"🥗 **Diet:** {', '.join(diet_prefs)}")
+    
+    # Budget info
+    budget_min = persona.get('budget_min')
+    budget_max = persona.get('budget_max')
+    if budget_min and budget_max:
+        st.sidebar.markdown(f"💰 **Budget:** ${budget_min}-${budget_max}")
+    
+    # Lifestyle indicators
+    income_level = persona.get('income_level')
+    organic_pref = persona.get('organic_preference')
+    
+    if income_level:
+        st.sidebar.markdown(f"📊 **Income:** {income_level}")
+    if organic_pref:
+        organic_pct = float(organic_pref) * 100
+        st.sidebar.markdown(f"🌱 **Organic Preference:** {organic_pct:.0f}%")
+
+
+def _render_manual_persona_config():
+    """Render manual persona configuration as fallback/override"""
+    st.markdown("**Quick Persona Setup:**")
+    
+    # Diet preferences
+    diet_options = st.multiselect(
+        "Diet Preferences",
+        options=["Vegetarian", "Vegan", "Gluten-Free", "Keto", "Paleo", "Low-Sodium", "Diabetic-Friendly"],
+        key="manual_diet_prefs"
+    )
+    
+    # Allergies
+    allergy_options = st.multiselect(
+        "Allergies",
+        options=["Nuts", "Dairy", "Gluten", "Eggs", "Soy", "Shellfish", "Fish"],
+        key="manual_allergies"
+    )
+    
+    # Budget range
+    budget_range = st.slider(
+        "Budget Range ($)",
+        min_value=20,
+        max_value=300,
+        value=(50, 150),
+        key="manual_budget"
+    )
+    
+    # Income level
+    income_level = st.selectbox(
+        "Income Level",
+        options=["low", "middle", "high"],
+        key="manual_income"
+    )
+    
+    # Preferences
+    organic_pref = st.slider(
+        "Organic Preference",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,
+        help="0 = No preference, 1 = Strongly prefer organic",
+        key="manual_organic"
+    )
+    
+    price_sensitivity = st.slider(
+        "Price Sensitivity", 
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,
+        help="0 = Price insensitive, 1 = Very price sensitive",
+        key="manual_price_sens"
+    )
+    
+    # Apply manual configuration
+    if st.button("Apply Manual Persona", key="apply_manual_persona"):
+        manual_persona = {
+            'customer_id': 'manual_config',
+            'allergies': allergy_options,
+            'diet_preferences': diet_options,
+            'budget_min': budget_range[0],
+            'budget_max': budget_range[1],
+            'income_level': income_level,
+            'organic_preference': organic_pref,
+            'price_sensitivity': price_sensitivity
+        }
+        
+        st.session_state.customer_persona = manual_persona
+        st.success("✅ Manual persona applied!")
+        st.rerun()

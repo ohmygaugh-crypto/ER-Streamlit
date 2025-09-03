@@ -4,6 +4,7 @@ Cart simulator and recommendation display component
 import streamlit as st
 import pandas as pd
 from typing import Dict, List, Any
+from ...utils import apply_persona_filtering
 
 
 def render_cart_simulator(stats: Dict[str, Any], config: Dict[str, Any]):
@@ -204,9 +205,19 @@ def _generate_recommendations_for_state(cart_items: List[str], stats: Dict[str, 
         recs_df = recommender.compute_recommendations(
             cart_items=product_ids,  # Use product IDs for recommendation generation
             item_stats=stats,
-            topk=config["rec_k"],
+            topk=config["rec_k"] * 3,  # Get more recommendations for persona filtering
             exclude_in_cart=True
         )
+        
+        if recs_df.empty:
+            st.session_state.current_recommendations = pd.DataFrame()
+            return
+        
+        # Apply persona-based filtering
+        recs_df = _apply_persona_filtering(recs_df, meta)
+        
+        # Take top K after persona filtering
+        recs_df = recs_df.head(config["rec_k"])
         
         if recs_df.empty:
             st.session_state.current_recommendations = pd.DataFrame()
@@ -372,6 +383,33 @@ def _skip_recommendation_callback():
 def _skip_to_next_recommendation():
     """Legacy function - now just calls the callback"""
     _skip_recommendation_callback()
+
+
+def _apply_persona_filtering(recs_df: pd.DataFrame, meta: Dict[str, Dict]) -> pd.DataFrame:
+    """Apply persona-based filtering to recommendations using centralized utils"""
+    persona = st.session_state.get("customer_persona")
+    return apply_persona_filtering(recs_df, meta, persona)
+
+
+# Removed: _contains_allergen - now using utils.dietary_restrictions.contains_allergen
+
+
+# ============================================================================
+# REFACTORED: All dietary restriction and persona filtering functions moved to utils/
+# ============================================================================
+# 
+# The following functions have been moved to centralized utilities:
+# 
+# OLD LOCATION -> NEW LOCATION:
+# - _contains_allergen -> utils.dietary_restrictions.contains_allergen  
+# - _check_diet_exclusions -> utils.dietary_restrictions.check_diet_exclusions  
+# - _calculate_diet_compatibility -> utils.dietary_restrictions.calculate_diet_compatibility
+# - _calculate_income_preference_score -> utils.persona_filtering.calculate_income_preference_score
+# - _generate_persona_reason -> utils.persona_filtering.generate_persona_reason
+# - _apply_persona_filtering -> utils.persona_filtering.apply_persona_filtering (wrapper above)
+#
+# This provides better code organization, reusability, and testing capabilities.
+# ============================================================================
 
 
 
