@@ -248,6 +248,12 @@ def _render_cart_metrics_and_insights():
     recommended_add_ons_selected = len(selected_recs)
     upselling_percentage = _calculate_upselling_percentage(cart_value, selected_recs)
     
+    # Display cart success message if available (moved from callback to prevent page jump)
+    if "cart_success_message" in st.session_state:
+        st.success(st.session_state.cart_success_message)
+        # Clear the message after displaying
+        del st.session_state.cart_success_message
+    
     # Display cart metrics
     st.markdown("### 🛍️ Cart & Upselling Metrics")
     
