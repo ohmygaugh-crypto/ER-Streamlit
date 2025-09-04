@@ -50,6 +50,9 @@ def render_cart_simulator(stats: Dict[str, Any], config: Dict[str, Any]):
     
     # Quick Add to Cart with enhanced UIUX
     _render_enhanced_quick_add_interface()
+    
+    # Add LLM-enhanced features if enabled
+    _render_llm_enhanced_features(stats, config)
 
 
 def _create_product_options(meta: Dict[str, Dict]) -> Dict[str, str]:
@@ -346,7 +349,6 @@ def _add_recommendation_callback():
     
     # Get current cart
     current_cart = st.session_state.get("cart_items", [])
-    
     if display_name not in current_cart:
         # Update cart
         st.session_state.cart_items = current_cart + [display_name]
@@ -410,6 +412,168 @@ def _apply_persona_filtering(recs_df: pd.DataFrame, meta: Dict[str, Dict]) -> pd
 #
 # This provides better code organization, reusability, and testing capabilities.
 # ============================================================================
+
+
+def _render_llm_enhanced_features(stats: Dict[str, Any], config: Dict[str, Any]):
+    """Render LLM-enhanced features if enabled"""
+    
+    if not st.session_state.get('enable_llm', False):
+        return
+    
+    llm_features = st.session_state.get('llm_features', {})
+    persona = st.session_state.get('customer_persona', {})
+    cart_items = st.session_state.get('cart_items', [])
+    
+    from ...core.llm_engine import LLMRecommendationEnhancer
+    enhancer = LLMRecommendationEnhancer()
+    
+    # Feature 2: Smart Grocery List Generation
+    if llm_features.get('smart_grocery_lists', False):
+        st.divider()
+        st.markdown("### 🤖 AI Grocery List Generator")
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            household_size = st.slider("Household Size", 1, 8, 2, key="household_size_slider")
+        
+        with col2:
+            meal_days = st.slider("Days to Plan", 1, 14, 7, key="meal_days_slider")
+        
+        with col3:
+            if st.button("🎯 Generate Smart List", key="generate_smart_list"):
+                if persona:
+                    with st.spinner("🤖 AI is creating your personalized grocery list..."):
+                        ai_grocery_list = enhancer.generate_grocery_list_from_persona(
+                            persona, household_size, meal_days
+                        )
+                    
+                    if ai_grocery_list:
+                        st.session_state.grocery_list = ai_grocery_list
+                        st.success(f"✅ Generated {len(ai_grocery_list)} items!")
+                        
+                        # Display generated list
+                        with st.expander("📋 Generated Grocery List", expanded=True):
+                            for i, item in enumerate(ai_grocery_list, 1):
+                                st.markdown(f"{i}. {item}")
+                else:
+                    st.warning("⚠️ Upload persona data first for personalized lists")
+    
+    # Feature 4: Meal Planning
+    if llm_features.get('meal_planning', False) and cart_items:
+        st.divider()
+        st.markdown("### 🍽️ AI Meal Planner")
+        
+        if st.button("🧠 Suggest Meals from Cart", key="suggest_meals"):
+            with st.spinner("🤖 Analyzing your cart for meal possibilities..."):
+                meal_plans = enhancer.suggest_meal_plans(cart_items, persona)
+            
+            if meal_plans:
+                # Display possible meals
+                if meal_plans.get('possible_meals'):
+                    st.markdown("#### 🎯 Meals You Can Make:")
+                    for i, meal in enumerate(meal_plans['possible_meals'], 1):
+                        with st.expander(f"🍽️ {meal.get('name', f'Meal {i}')}"):
+                            available = meal.get('ingredients_available', [])
+                            missing = meal.get('missing', [])
+                            
+                            if available:
+                                st.markdown(f"**✅ Available:** {', '.join(available)}")
+                            if missing:
+                                st.markdown(f"**🛒 Missing:** {', '.join(missing)}")
+                
+                # Display suggested additional meals
+                if meal_plans.get('suggested_meals'):
+                    st.markdown("#### 💡 Suggested Additional Meals:")
+                    for i, meal in enumerate(meal_plans['suggested_meals'], 1):
+                        with st.expander(f"➕ {meal.get('name', f'Suggested Meal {i}')}"):
+                            shopping_list = meal.get('full_shopping_list', [])
+                            if shopping_list:
+                                st.markdown("**🛒 Shopping List:**")
+                                for item in shopping_list:
+                                    st.markdown(f"- {item}")
+    
+    # Feature 5: Persona Enrichment
+    if llm_features.get('persona_enrichment', False) and cart_items:
+        st.divider()
+        st.markdown("### 🧠 AI Persona Intelligence")
+        
+        if st.button("🔍 Analyze Shopping Patterns", key="analyze_patterns"):
+            with st.spinner("🤖 AI is analyzing your shopping patterns..."):
+                enrichment = enhancer.enrich_persona_from_patterns(cart_items, persona)
+            
+            if enrichment:
+                st.markdown("#### 🎯 AI Insights About Your Shopping Style:")
+                
+                # Display insights with confidence scores
+                if 'cooking_skill' in enrichment:
+                    skill_data = enrichment['cooking_skill']
+                    confidence = skill_data.get('confidence', 0)
+                    level = skill_data.get('level', 'unknown')
+                    st.info(f"🍳 **Cooking Skill**: {level.title()} (Confidence: {confidence:.0%})")
+                
+                if 'time_availability' in enrichment:
+                    time_data = enrichment['time_availability']
+                    confidence = time_data.get('confidence', 0)
+                    level = time_data.get('level', 'unknown')
+                    st.info(f"⏰ **Time Availability**: {level.title()} (Confidence: {confidence:.0%})")
+                
+                if 'health_consciousness' in enrichment:
+                    health_data = enrichment['health_consciousness']
+                    score = health_data.get('score', 0)
+                    confidence = health_data.get('confidence', 0)
+                    st.info(f"🥗 **Health Consciousness**: {score:.0%} (Confidence: {confidence:.0%})")
+                
+                if 'seasonal_preferences' in enrichment:
+                    preferences = enrichment['seasonal_preferences']
+                    if preferences:
+                        st.info(f"🌱 **Seasonal Preferences**: {', '.join(preferences)}")
+    
+    # Feature 7: Advanced Allergen Analysis
+    if llm_features.get('allergen_analysis', False) and persona.get('allergies'):
+        st.divider()
+        st.markdown("### 🛡️ AI Allergy Safety Analysis")
+        
+        allergies = persona.get('allergies', [])
+        if allergies:
+            st.markdown(f"**🚫 Monitoring for**: {', '.join(allergies)}")
+            
+            # Analyze current cart items for allergen risks
+            if cart_items and st.button("🔍 Analyze Cart Safety", key="analyze_allergens"):
+                st.markdown("#### 🛡️ Allergen Safety Report:")
+                
+                for item in cart_items:
+                    product_name = item.split(" (")[0].strip()
+                    
+                    with st.spinner(f"🤖 Analyzing {product_name}..."):
+                        analysis = enhancer.intelligent_allergen_analysis(
+                            product_name, 
+                            "ingredients not available",  # Would come from API in real implementation
+                            allergies
+                        )
+                    
+                    # Display analysis results
+                    risk_level = analysis.get('risk_level', 'unknown')
+                    is_safe = analysis.get('is_safe', False)
+                    confidence = analysis.get('confidence', 0)
+                    
+                    if is_safe:
+                        st.success(f"✅ **{product_name}**: Safe (Confidence: {confidence:.0%})")
+                    elif risk_level == 'high':
+                        st.error(f"🚨 **{product_name}**: HIGH RISK (Confidence: {confidence:.0%})")
+                        risks = analysis.get('allergen_risks', [])
+                        if risks:
+                            st.markdown(f"   **Risks**: {', '.join(risks)}")
+                        
+                        alternatives = analysis.get('safe_alternatives', [])
+                        if alternatives:
+                            st.markdown(f"   **Alternatives**: {', '.join(alternatives)}")
+                    
+                    elif risk_level in ['medium', 'low']:
+                        st.warning(f"⚠️ **{product_name}**: {risk_level.upper()} risk (Confidence: {confidence:.0%})")
+                    
+                    else:
+                        st.info(f"ℹ️ **{product_name}**: Unable to analyze")
 
 
 

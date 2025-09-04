@@ -49,6 +49,10 @@ def render_main_view(orders_df: pd.DataFrame, config: Dict[str, Any]):
     </style>
     """, unsafe_allow_html=True)
     
+    # Add API status widget at top
+    from ..components.api_status import render_api_status_widget
+    render_api_status_widget()
+    
     if orders_df is None or orders_df.empty:
         st.warning("⚠️ No data available. Please check your data source configuration.")
         return

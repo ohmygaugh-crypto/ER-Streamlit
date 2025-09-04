@@ -48,6 +48,17 @@ def render_sidebar() -> Dict[str, Any]:
     
     st.sidebar.divider()
     
+    # API provider selection
+    api_client = _render_api_provider_section()
+    
+    # LLM settings
+    llm_enabled = _render_llm_settings_section()
+    
+    # Token refresh scheduler
+    _render_token_refresh_scheduler()
+    
+    st.sidebar.divider()
+    
     # Network analysis parameters
     st.sidebar.subheader("🕸️ Network Filters")
     min_support = st.sidebar.slider(
@@ -154,7 +165,9 @@ def render_sidebar() -> Dict[str, Any]:
         "rec_k": rec_k,
         "margin_pct": margin_pct,
         "layout_choice": layout_choice,
-        "show_communities": show_communities
+        "show_communities": show_communities,
+        "api_client": api_client,
+        "llm_enabled": llm_enabled
     }
 
 
@@ -512,3 +525,232 @@ def _render_manual_persona_config():
         st.session_state.customer_persona = manual_persona
         st.success("✅ Manual persona applied!")
         st.rerun()
+
+
+def _render_api_provider_section():
+    """Render API provider selection and configuration"""
+    st.sidebar.subheader("🔌 Grocery Data Source")
+    
+    # Provider selection
+    provider_options = {
+        'mock': '🎭 Enhanced Mock Data',
+        'instacart': '🥕 Instacart Connect API',
+        'kroger': '🛒 Kroger API (Coming Soon)'
+    }
+    
+    selected_provider = st.sidebar.selectbox(
+        "Data Provider",
+        options=list(provider_options.keys()),
+        format_func=lambda x: provider_options[x],
+        index=0,
+        key="api_provider_select"
+    )
+    
+    # Store selection in session state
+    st.session_state.active_grocery_api = selected_provider
+    
+    # Provider-specific configuration
+    if selected_provider == 'instacart':
+        return _render_instacart_token_manager()
+    
+    elif selected_provider == 'kroger':
+        st.sidebar.info("🚧 Kroger API integration coming soon!")
+        st.sidebar.markdown("**Alternative**: Use mock data or Instacart for now")
+        return None
+    
+    else:  # mock
+        st.sidebar.success("✅ Using enhanced mock grocery data")
+        st.sidebar.info("💡 Switch to real APIs when credentials are available")
+        return None
+
+
+def _render_instacart_token_manager():
+    """Render Instacart API token management interface"""
+    from ...core.api_client import InstacartAPIClient
+    
+    st.sidebar.markdown("#### 🥕 Instacart API Settings")
+    
+    client = InstacartAPIClient()
+    
+    # Configuration section
+    with st.sidebar.expander("🔧 API Configuration", expanded=False):
+        base_url = st.text_input(
+            "Development Server URL",
+            placeholder="https://your-instacart-dev-domain.com",
+            help="Your assigned Instacart development server URL",
+            key="instacart_base_url"
+        )
+        
+        client_id = st.text_input(
+            "Client ID",
+            type="password",
+            help="Your Instacart Connect client ID",
+            key="instacart_client_id"
+        )
+        
+        client_secret = st.text_input(
+            "Client Secret", 
+            type="password",
+            help="Your Instacart Connect client secret",
+            key="instacart_client_secret"
+        )
+        
+        if st.button("💾 Save Configuration", key="save_instacart_config"):
+            if all([base_url, client_id, client_secret]):
+                client.configure_credentials(base_url, client_id, client_secret)
+                st.success("✅ Configuration saved!")
+                st.rerun()
+            else:
+                st.error("❌ Please fill in all fields")
+    
+    # Token status and management
+    token_status = client.get_token_status()
+    
+    if token_status['status'] == 'valid':
+        st.sidebar.success(f"✅ {token_status['message']}")
+        
+        # Show refresh button if token expires soon (< 2 hours)
+        if token_status['hours_remaining'] < 2:
+            st.sidebar.warning("⚠️ Token expires soon!")
+            if st.sidebar.button("🔄 Refresh Token", key="refresh_token_soon"):
+                result = client.generate_token()
+                if result['success']:
+                    st.sidebar.success("✅ Token refreshed!")
+                    st.rerun()
+                else:
+                    st.sidebar.error(f"❌ {result['error']}")
+    
+    elif token_status['status'] == 'expired':
+        st.sidebar.warning("⚠️ Token has expired")
+        if st.sidebar.button("🔄 Generate New Token", key="generate_new_token"):
+            result = client.generate_token()
+            if result['success']:
+                st.sidebar.success("✅ New token generated!")
+                st.rerun()
+            else:
+                st.sidebar.error(f"❌ {result['error']}")
+    
+    else:  # no_token
+        st.sidebar.info("ℹ️ Configure API credentials above")
+        if st.sidebar.button("🚀 Generate Token", key="generate_first_token"):
+            result = client.generate_token()
+            if result['success']:
+                st.sidebar.success("✅ Token generated!")
+                st.rerun()
+            else:
+                st.sidebar.error(f"❌ {result['error']}")
+    
+    return client
+
+
+def _render_llm_settings_section():
+    """Render LLM configuration in sidebar"""
+    st.sidebar.subheader("🤖 AI Enhancement Settings")
+    
+    enable_llm = st.sidebar.toggle(
+        "Enable AI Features",
+        value=st.session_state.get('enable_llm', False),
+        help="Use LLM for smart grocery lists, meal planning, and safety analysis",
+        key="enable_llm_toggle"
+    )
+    
+    st.session_state.enable_llm = enable_llm
+    
+    if enable_llm:
+        # LLM Provider selection
+        provider = st.sidebar.selectbox(
+            "AI Provider",
+            options=["openai", "anthropic", "local"],
+            format_func=lambda x: {
+                "openai": "🔥 OpenAI GPT",
+                "anthropic": "🧠 Anthropic Claude", 
+                "local": "🏠 Local Model"
+            }[x],
+            key="llm_provider_select"
+        )
+        
+        st.session_state.llm_provider = provider
+        
+        # Feature toggles
+        st.sidebar.markdown("**🎯 AI Features:**")
+        
+        features = {
+            'smart_grocery_lists': st.sidebar.checkbox("🛒 Smart Grocery Lists", value=True, key="feat_grocery"),
+            'meal_planning': st.sidebar.checkbox("🍽️ AI Meal Planning", value=True, key="feat_meals"),
+            'persona_enrichment': st.sidebar.checkbox("🧠 Persona Intelligence", value=True, key="feat_persona"),
+            'allergen_analysis': st.sidebar.checkbox("🛡️ Allergy Safety", value=True, key="feat_allergen")
+        }
+        
+        st.session_state.llm_features = features
+        
+        # API key configuration
+        if provider == "openai":
+            api_key = st.sidebar.text_input(
+                "OpenAI API Key",
+                type="password",
+                help="Your OpenAI API key for GPT models",
+                key="openai_api_key_input"
+            )
+            if api_key:
+                st.session_state.openai_api_key = api_key
+        
+        elif provider == "anthropic":
+            api_key = st.sidebar.text_input(
+                "Anthropic API Key",
+                type="password", 
+                help="Your Anthropic API key for Claude models",
+                key="anthropic_api_key_input"
+            )
+            if api_key:
+                st.session_state.anthropic_api_key = api_key
+        
+        return True
+    
+    return False
+
+
+def _render_token_refresh_scheduler():
+    """Render automatic token refresh scheduler"""
+    active_provider = st.session_state.get('active_grocery_api', 'mock')
+    
+    if active_provider == 'instacart':
+        st.sidebar.markdown("#### ⏰ Auto-Refresh Settings")
+        
+        auto_refresh = st.sidebar.toggle(
+            "Auto-refresh tokens",
+            value=st.session_state.get('auto_refresh_tokens', False),
+            help="Automatically refresh API tokens before they expire",
+            key="auto_refresh_toggle"
+        )
+        
+        if auto_refresh:
+            refresh_hours = st.sidebar.slider(
+                "Refresh when < X hours remain",
+                min_value=1,
+                max_value=12, 
+                value=4,
+                help="Automatically refresh token when this many hours remain",
+                key="auto_refresh_threshold_slider"
+            )
+            
+            st.session_state.auto_refresh_tokens = True
+            st.session_state.auto_refresh_threshold = refresh_hours
+            
+            # Check if auto-refresh needed
+            from ...core.api_client import InstacartAPIClient
+            client = InstacartAPIClient()
+            token_status = client.get_token_status()
+            
+            if (token_status['status'] == 'valid' and 
+                token_status['hours_remaining'] < refresh_hours):
+                
+                with st.sidebar.spinner("🔄 Auto-refreshing token..."):
+                    result = client.generate_token()
+                    if result['success']:
+                        st.sidebar.success("✅ Auto-refreshed!")
+                        st.rerun()
+                    else:
+                        st.sidebar.error("❌ Auto-refresh failed")
+        
+        else:
+            st.session_state.auto_refresh_tokens = False
